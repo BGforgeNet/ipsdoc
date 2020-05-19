@@ -15,15 +15,13 @@ install:
 
 script:
   - pyinstaller -F ipsdoc.py
-  - pwd
-  - ls
 
 deploy:
   provider: releases
   api_key: $GITHUB_TOKEN
   file:
-    - dist/ispdoc
-    - dist/ispdoc.exe
+    - dist/ipsdoc
+    - dist/ipsdoc.exe
   skip_cleanup: true
   on:
     tags: true
