@@ -29,7 +29,7 @@ def check_reqs():
     wine = shutil.which("wine")
     if wine is None:
       print("wine not present in PATH, aborting")
-      exit(1)
+      sys.exit(1)
 
 def get_exe_string(src_path, dst_path):
   cur_dir = os.path.dirname(sys.argv[0])
@@ -41,7 +41,7 @@ def get_exe_string(src_path, dst_path):
     exe = exe + " " + src_path + " " + dst_path + " -q0"
   if not exe:
     print("Unknown output file format, aborting")
-    exit(1)
+    sys.exit(1)
   if system != 'Windows':
     wine = shutil.which("wine")
     exe = wine + " " + exe
@@ -63,7 +63,7 @@ def get_acm_rate(fname):
 
 def fix_acm_rate(src_rate, dst_rate, fname):
   if src_rate == dst_rate:
-    exit()
+    sys.exit()
   print("rate mismatch, correcting")
   bitrate = struct.pack('<H', src_rate)
   with open(fname, 'r+b') as fh:
