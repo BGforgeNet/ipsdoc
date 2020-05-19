@@ -1,0 +1,8 @@
+argparse
+base64
+platform
+pyinstaller
+shutil
+struct
+subprocess
+wave
