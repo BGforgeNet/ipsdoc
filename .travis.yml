@@ -8,13 +8,17 @@ matrix:
       before_install:
         - choco install python3 --x86 --params "/InstallDir:C:\\python"
         - export PATH="/c/python:/c/python/scripts:$PATH"
+      script:
+        - pyinstaller -F ipsdoc.py
+        - dist/ipsdoc.exe -h
+
     - name: "Linux"
 
 install:
   - pip install -r requirements.txt
 
 script:
-  - pyinstaller -F ipsdoc.py -d bootloader
+  - pyinstaller -F ipsdoc.py
 
 deploy:
   provider: releases
