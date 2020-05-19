@@ -6,7 +6,7 @@ matrix:
       os: windows
       language: sh
       before_install:
-        - choco install python3 --params "/InstallDir:C:\\python"
+        - choco install python3 --x86 --params "/InstallDir:C:\\python"
         - export PATH="/c/python:/c/python/scripts:$PATH"
     - name: "Linux"
 
