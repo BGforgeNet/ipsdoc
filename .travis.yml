@@ -14,7 +14,7 @@ install:
   - pip install -r requirements.txt
 
 script:
-  - pyinstaller -F ipsdoc.py
+  - pyinstaller -F ipsdoc.py -d bootloader
 
 deploy:
   provider: releases
