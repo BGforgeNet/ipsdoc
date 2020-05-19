@@ -1,7 +1,14 @@
 language: python
-os:
-  - linux
-  - windows
+
+matrix:
+  include:
+    - name: "Windows"
+      os: windows
+      language: sh
+      before_install:
+        - choco install python3 --params "/InstallDir:C:\\python"
+        - export PATH="/c/python:/c/python/scripts:$PATH"
+    - name: "Linux"
 
 install:
   - pip install -r requirements.txt
