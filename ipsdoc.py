@@ -13,11 +13,14 @@ import base64
 
 parser = argparse.ArgumentParser(description='Convert sound file to ACM', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('ifile', help='input WAV, ACM or 8/16 bit raw PCM file')
-parser.add_argument('ofile', help='output ACM file')
+parser.add_argument('ofile', help='output ACM file', nargs="?")
 args = parser.parse_args()
 
 ifile = args.ifile
 ofile = args.ofile
+if ofile is None:
+  ofile = ifile.lower().rstrip(".wav") + ".acm"
+  print("output file not specified, defaulting to {}".format(ofile))
 
 acm_bitrate_off = 10
 acm_bitrate_len = 2
