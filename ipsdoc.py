@@ -22,8 +22,11 @@ if ofile is None:
   ofile = ifile.lower().rstrip(".wav") + ".acm"
   print("output file not specified, defaulting to {}".format(ofile))
 
+acm_channels_off = 8
+acm_channels_len = 2
 acm_bitrate_off = 10
 acm_bitrate_len = 2
+
 snd2acm_name = "snd2acm.exe"
 
 def check_reqs():
@@ -50,28 +53,37 @@ def get_exe_string(src_path, dst_path):
     exe = wine + " " + exe
   return exe
 
-def get_wav_rate(fname):
+def get_wav_params(fname):
   with wave.open(fname, mode=None) as wav:
     wav_rate = wav.getframerate()
-  print("source bitrate is {}".format(wav_rate))
-  return wav_rate
+    wav_channels = wav.getnchannels()
+  print("source bitrate: {}, channels: {}".format(wav_rate, wav_channels))
+  return {"rate": wav_rate, "channels": wav_channels}
 
-def get_acm_rate(fname):
+def get_acm_params(fname):
   with open(fname, 'rb') as ofh:
     odata = ofh.read()
   bitrate = odata[acm_bitrate_off:acm_bitrate_off+acm_bitrate_len]
   acm_rate = struct.unpack('<H', bitrate)[0]
-  print("output bitrate is {}".format(acm_rate))
-  return acm_rate
+  channels = odata[acm_channels_off:acm_channels_off+acm_channels_len]
+  acm_channels = struct.unpack('<H', channels)[0]
+  print("output bitrate: {}, channels: {}".format(acm_rate, acm_channels))
+  return {"rate": acm_rate, "channels": acm_channels}
 
-def fix_acm_rate(src_rate, dst_rate, fname):
-  if src_rate == dst_rate:
-    sys.exit()
-  print("rate mismatch, correcting")
-  bitrate = struct.pack('<H', src_rate)
-  with open(fname, 'r+b') as fh:
-    fh.seek(acm_bitrate_off)
-    fh.write(bitrate)
+def fix_acm_params(src_params, fname):
+  dst_params = get_acm_params(fname)
+  if src_params["rate"] != dst_params["rate"]:
+    bitrate = struct.pack('<H', src_params["rate"])
+    with open(fname, 'r+b') as fh:
+      fh.seek(acm_bitrate_off)
+      fh.write(bitrate)
+    print("rate mismatch corrected")
+  if src_params["channels"] != dst_params["channels"]:
+    channels = struct.pack('<H', dst_params["channels"])
+    with open(fname, 'r+b') as fh:
+      fh.seek(acm_channels_off)
+      fh.write(channels)
+    print("channels mismatch corrected")
 
 def convert(src_path, dst_path):
   exe = get_exe_string(src_path, dst_path)
@@ -87,6 +99,5 @@ def create_bin():
 check_reqs()
 create_bin()
 convert(ifile, ofile)
-wav_rate = get_wav_rate(ifile)
-acm_rate = get_acm_rate(ofile)
-fix_acm_rate(wav_rate, acm_rate, ofile)
+wav_params = get_wav_params(ifile)
+fix_acm_params(wav_params, ofile)
