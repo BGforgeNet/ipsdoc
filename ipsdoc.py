@@ -19,7 +19,7 @@ args = parser.parse_args()
 ifile = args.ifile
 ofile = args.ofile
 if ofile is None:
-  ofile = ifile.lower().rstrip(".wav") + ".acm"
+  ofile = ifile.lower().rstrip("wav") + "acm"
   print("output file not specified, defaulting to {}".format(ofile))
 
 acm_channels_off = 8
