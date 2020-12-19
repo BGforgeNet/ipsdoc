@@ -9,6 +9,7 @@ import subprocess
 import sys, os
 import ipsdoc_bin
 import base64
+import re
 
 
 parser = argparse.ArgumentParser(description='Convert sound file to ACM', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -19,7 +20,7 @@ args = parser.parse_args()
 ifile = args.ifile
 ofile = args.ofile
 if ofile is None:
-  ofile = ifile.lower().rstrip(".wav") + ".acm"
+  ofile = re.sub("\.wav$", ".acm", ifile.lower())
   print("output file not specified, defaulting to {}".format(ofile))
 
 acm_channels_off = 8
