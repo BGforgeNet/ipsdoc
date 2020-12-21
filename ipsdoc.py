@@ -80,7 +80,7 @@ def fix_acm_params(src_params, fname):
       fh.write(bitrate)
     print("rate mismatch corrected")
   if src_params["channels"] != dst_params["channels"]:
-    channels = struct.pack('<H', dst_params["channels"])
+    channels = struct.pack('<H', src_params["channels"])
     with open(fname, 'r+b') as fh:
       fh.seek(acm_channels_off)
       fh.write(channels)
