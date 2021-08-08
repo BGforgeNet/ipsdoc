@@ -96,9 +96,13 @@ def create_bin():
   if not os.path.isfile(snd2acm_path):
     with open(snd2acm_path, "wb") as fh:
       fh.write(base64.b64decode(ipsdoc_bin.snd2acm_base64))
+    return True
+  return False
 
 check_reqs()
-create_bin()
+created_bin = create_bin()
 convert(ifile, ofile)
 wav_params = get_wav_params(ifile)
 fix_acm_params(wav_params, ofile)
+if created_bin: # clean up after self
+  os.remove(os.path.join(os.path.dirname(sys.argv[0]), snd2acm_name))
