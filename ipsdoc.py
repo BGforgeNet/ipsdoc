@@ -45,13 +45,14 @@ def get_exe_string(src_path, dst_path):
   exe = False
   if dst_path.lower().endswith(".acm"):
     exe = os.path.join(cur_dir, snd2acm_name)
-    exe = exe + " " + src_path + " " + dst_path + " -q0"
-  if not exe:
+  else:
     print("Unknown output file format, aborting")
     sys.exit(1)
   if system != 'Windows':
     wine = shutil.which("wine")
-    exe = wine + " " + exe
+    exe = '"{}" "{}"'.format(wine, exe)
+  # args
+  exe = exe + " " + src_path + " " + dst_path + " -q0"
   return exe
 
 def get_wav_params(fname):
@@ -88,7 +89,8 @@ def fix_acm_params(src_params, fname):
 
 def convert(src_path, dst_path):
   exe = get_exe_string(src_path, dst_path)
-  subprocess.run(exe, shell=True)
+  result = subprocess.run(exe, shell=True)
+  return result.returncode
 
 def create_bin():
   cur_dir = os.path.dirname(sys.argv[0])
@@ -101,7 +103,10 @@ def create_bin():
 
 check_reqs()
 created_bin = create_bin()
-convert(ifile, ofile)
+exit_code = convert(ifile, ofile)
+if exit_code != 0:
+  print("error: snd2acm exited with code {}".format(exit_code))
+  sys.exit(exit_code)
 wav_params = get_wav_params(ifile)
 fix_acm_params(wav_params, ofile)
 if created_bin: # clean up after self
