@@ -20,6 +20,18 @@ jobs:
           pyinstaller -F ipsdoc.py
         shell: bash
 
+      - name: Test
+        if: matrix.os == 'windows-latest'
+        run: |
+          md "t e s t"
+          copy dist/ipsdoc.exe "t e s t"
+          copy wav/1.wav "t e s t"
+          cd "t e s t"
+          cd
+          dir
+          "%cd%\ipsdoc.exe" "1.wav"
+        shell: cmd
+
       - name: Upload artifacts - exe
         uses: actions/upload-artifact@v2
         if: "!startsWith(github.ref, 'refs/tags/') && (matrix.os == 'windows-latest')"

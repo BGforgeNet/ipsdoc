@@ -1,5 +1,6 @@
 *.acm
 *.wav
+!wav/*.wav
 *.exe
 __pycache__/
 build/
