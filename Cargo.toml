@@ -1,0 +1,63 @@
+[workspace]
+members = [".", "oracles"]
+# oracles builds third-party decoders from source fetched at build time; plain cargo commands leave it out, and its
+# gate names it (`cargo test -p oracles`).
+default-members = ["."]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.99"
+authors = ["BGforge"]
+license = "GPL-3.0-only"
+publish = false
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+# `expect` stays a warning: it is allowed on an invariant that cannot fail, with the message saying why.
+unwrap_used = "deny"
+expect_used = "warn"
+# Each `unsafe` block holds one operation and a `// SAFETY:` comment justifying it.
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "deny"
+mem_forget = "deny"
+# Suppress with `#[expect(lint, reason = "...")]`, which fails once the finding is gone.
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+await_holding_lock = "deny"
+await_holding_refcell_ref = "deny"
+let_underscore_future = "deny"
+arc_with_non_send_sync = "deny"
+large_futures = "warn"
+unused_async = "warn"
+ptr_arg = "warn"
+needless_range_loop = "warn"
+# A new variant breaks the match instead of being absorbed by a catch-all.
+wildcard_enum_match_arm = "warn"
+from_over_into = "warn"
+derive_partial_eq_without_eq = "warn"
+
+[package]
+name = "ipsdoc"
+version = "0.1.0"
+description = "Reads, writes and repairs Interplay ACM, WAVC and other game sound files"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

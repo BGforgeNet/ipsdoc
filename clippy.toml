@@ -1,0 +1,4 @@
+# Tests assert by unwrapping: a panic there is the failure report, not a crash in shipped code.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-dbg-in-tests = true
