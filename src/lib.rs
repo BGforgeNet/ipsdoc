@@ -5,3 +5,5 @@
     clippy::missing_panics_doc
 )]
 //! Interplay ACM, WAVC and game sound file handling.
+
+pub mod acm;

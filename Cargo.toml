@@ -1,6 +1,6 @@
 [workspace]
 members = [".", "oracles"]
-# oracles builds third-party decoders from source fetched at build time; plain cargo commands leave it out, and its
+# oracles' tests need the reference decoders that oracles/build.sh builds; plain cargo commands leave it out, and its
 # gate names it (`cargo test -p oracles`).
 default-members = ["."]
 resolver = "3"
@@ -61,3 +61,6 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[dependencies]
+thiserror = "2"

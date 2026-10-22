@@ -1,6 +1,7 @@
-// Decodes one bare ACM held in memory with the Fallout 2 engine's decoder (fallout2-ce).
+// Decodes one bare ACM with the Fallout 2 engine's decoder (fallout2-ce).
 #include <cstring>
 
+#include "harness.h"
 #include "sound_decoder.h"
 
 namespace {
@@ -25,8 +26,7 @@ int read_input(void* data, void* buffer, unsigned int size)
 
 } // namespace
 
-// Writes up to `cap` interleaved samples to `out`; returns how many, or -1 if the header is rejected.
-extern "C" long ipsdoc_oracle_fallout2ce(const unsigned char* data, size_t len, short* out, size_t cap)
+long harness_decode(const unsigned char* data, size_t len, short* out, size_t cap)
 {
     Input in { data, len, 0 };
     int channels, rate, samples;
@@ -37,4 +37,9 @@ extern "C" long ipsdoc_oracle_fallout2ce(const unsigned char* data, size_t len, 
     size_t got = fallout::soundDecoderDecode(decoder, out, cap * sizeof(short)) / sizeof(short);
     fallout::soundDecoderFree(decoder);
     return static_cast<long>(got);
+}
+
+int main(int argc, char** argv)
+{
+    return harness_main(argc, argv);
 }

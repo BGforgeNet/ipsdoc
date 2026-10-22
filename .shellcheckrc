@@ -1,0 +1,36 @@
+# Canonical shellcheck config. COPY into the repo root as `.shellcheckrc` (the leading dot is dropped here so
+# the file is visible in this directory). shellcheck reads the nearest one walking up from each script.
+#
+# shellcheck's default set is already good; the value of a config is the OPTIONAL checks, which are off by
+# default and have to be named one at a time. Run shellcheck at its default severity: the checks below report
+# at info or style, so `-S warning` silences every one of them.
+
+# A useless `cat` is an extra fork (`cmd < file` does the same).
+enable=useless-use-of-cat
+
+# DELIBERATELY NOT ENABLED: check-set-e-suppressed (SC2310). It flags every function called in a condition or a
+# `&&` chain, where `set -e` stops applying. On a real 53-script repo it produced 19 hits, 18 of them a predicate
+# whose status the caller branches on deliberately, so it is noise at that ratio.
+
+# DELIBERATELY NOT ENABLED: check-extra-masked-returns (SC2312). It is the general case of the SC2155
+# exit-status trap (`local x="$(cmd)"` masks cmd's status), so it looks like it belongs here - but it fires on
+# any `"$(cmd)"` whose status is masked, which is pervasive in correct scripts: on a real 48-script corpus it was
+# 333 of 386 findings. A check at that noise ratio gets the whole config disabled. Revisit only if the scripts
+# it flags are ever audited individually.
+
+# Sourced files shellcheck cannot follow (SC1091) are informational, not defects; a repo with a lib/ of
+# sourced helpers reports one per source site.
+disable=SC1091
+
+# `command -v`, not `which` - `which` is an external fork with inconsistent exit codes across systems.
+enable=deprecate-which
+
+# Quote every expansion, not just the ones that currently contain metacharacters. The unquoted form is
+# correct until the data changes, which is the worst kind of correct.
+enable=quote-safe-variables
+
+# `[[ ]]` in bash: no word-splitting on unquoted expansions, and `&&`/`||` work inside it.
+enable=require-double-brackets
+
+# `[ -n "$var" ]` over the bare `[ "$var" ]`, which is unreadable and has edge cases.
+enable=avoid-nullary-conditions

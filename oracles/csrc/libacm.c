@@ -1,6 +1,7 @@
-/* Decodes one bare ACM held in memory with libacm, keeping the header's channel count. */
+/* Decodes one bare ACM with libacm, keeping the header's channel count. */
 #include <string.h>
 
+#include "harness.h"
 #include "libacm.h"
 
 struct input {
@@ -21,8 +22,7 @@ static int read_input(void *ptr, int size, int n, void *datasrc)
     return (int)(want / (size_t)size);
 }
 
-/* Writes up to `cap` interleaved samples to `out`; returns how many, or a negative libacm error. */
-long ipsdoc_oracle_libacm(const unsigned char *data, size_t len, short *out, size_t cap)
+long harness_decode(const unsigned char *data, size_t len, short *out, size_t cap)
 {
     struct input in = { data, len, 0 };
     acm_io_callbacks io = { read_input, NULL, NULL, NULL };
@@ -33,4 +33,9 @@ long ipsdoc_oracle_libacm(const unsigned char *data, size_t len, short *out, siz
     int got = acm_read_loop(acm, out, (unsigned)(cap * 2), 0, 2, 1);
     acm_close(acm);
     return got < 0 ? got : got / 2;
+}
+
+int main(int argc, char **argv)
+{
+    return harness_main(argc, argv);
 }

@@ -1,8 +1,9 @@
-// Decodes one bare ACM held in memory the way GemRB's ACM importer does: its unpacker and subband decoder, driven by
-// the importer's header parse and sample loop (shift by `levels`, truncate to 16 bits, stop at the header count).
+// Decodes one bare ACM the way GemRB's ACM importer does: its unpacker and subband decoder, driven by the importer's
+// header parse and sample loop (shift by `levels`, truncate to 16 bits, stop at the header count).
 #include <cstdlib>
 
 #include "Streams/DataStream.h"
+#include "harness.h"
 #include "decoder.h"
 #include "unpacker.h"
 
@@ -19,8 +20,7 @@ unsigned read_le(const unsigned char* p, int bytes)
 
 } // namespace
 
-// Writes up to `cap` interleaved samples to `out`; returns how many, or -1 if the header is rejected.
-extern "C" long ipsdoc_oracle_gemrb(const unsigned char* data, size_t len, short* out, size_t cap)
+long harness_decode(const unsigned char* data, size_t len, short* out, size_t cap)
 {
     if (len < 14 || read_le(data, 4) != 0x01032897) {
         return -1;
@@ -52,4 +52,9 @@ extern "C" long ipsdoc_oracle_gemrb(const unsigned char* data, size_t len, short
     }
     free(block);
     return static_cast<long>(got);
+}
+
+int main(int argc, char** argv)
+{
+    return harness_main(argc, argv);
 }
