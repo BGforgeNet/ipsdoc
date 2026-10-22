@@ -63,4 +63,8 @@ panic = "abort"
 strip = true
 
 [dependencies]
-thiserror = "2"
+hound = "=3.5.1"
+rubato = "=5.0.1"
+symphonia = { version = "=0.6.1", default-features = false, features = ["wav", "pcm", "adpcm", "ogg", "vorbis", "flac", "mp3", "aac", "isomp4", "alac"] }
+thiserror = "=2.0.21"
+vorbis_rs = "=0.5.6"

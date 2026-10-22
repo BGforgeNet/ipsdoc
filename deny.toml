@@ -6,9 +6,15 @@ allow = [
     "MIT",
     "Apache-2.0",
     "BSD-3-Clause",
+    "MPL-2.0",
     "Unicode-3.0",
 ]
 
 [bans]
 multiple-versions = "deny"
 highlight = "all"
+skip = [
+    # rubato's `visibility` macro is still on syn 2 while thiserror is on syn 3; a proc-macro dependency, built for
+    # the host only, so nothing of either ships in the binary.
+    { crate = "syn@2.0.119", reason = "build-time only, via rubato's visibility macro" },
+]

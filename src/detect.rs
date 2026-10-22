@@ -8,7 +8,7 @@ pub enum Format {
     Acm,
     /// WAVC V1: a 28-byte header over an ACM.
     Wavc,
-    /// RIFF WAVE.
+    /// RIFF of the WAVE form.
     Riff,
     /// Ogg (Vorbis in the games).
     Ogg,
@@ -35,7 +35,7 @@ pub fn detect(head: &[u8]) -> Format {
         Format::Acm
     } else if head.starts_with(b"WAVC") {
         Format::Wavc
-    } else if head.starts_with(b"RIFF") {
+    } else if head.starts_with(b"RIFF") && head.get(8..12) == Some(b"WAVE") {
         Format::Riff
     } else if head.starts_with(b"OggS") {
         Format::Ogg
@@ -54,6 +54,9 @@ mod tests {
         assert_eq!(detect(b"WAVCV1.0"), Format::Wavc);
         assert_eq!(detect(b"RIFF\0\0\0\0WAVE"), Format::Riff);
         assert_eq!(detect(b"OggS\0"), Format::Ogg);
+        // RIFF holds more than sound (WebP images, AVI): only the WAVE form is.
+        assert_eq!(detect(b"RIFF\0\0\0\0WEBPVP8 "), Format::Other);
+        assert_eq!(detect(b"RIFF\0\0\0\0"), Format::Other);
         assert_eq!(detect(b"fLaC"), Format::Other);
         assert_eq!(detect(b"Ri"), Format::Other);
         assert_eq!(detect(b""), Format::Other);

@@ -9,4 +9,8 @@
 pub mod acm;
 pub mod analysis;
 pub mod detect;
+pub mod input;
+pub mod output;
+pub mod pcm;
+pub mod repair;
 pub mod wavc;

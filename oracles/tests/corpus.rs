@@ -56,7 +56,13 @@ fn read(path: &str, offset: u64, len: u64) -> Vec<u8> {
     bytes
 }
 
+/// The unique ACM and WAVC streams.
 fn load() -> Vec<Stream> {
+    load_containers(&["acm", "wavc"])
+}
+
+/// The unique streams of these containers (the manifest's names).
+fn load_containers(containers: &[&str]) -> Vec<Stream> {
     let manifest = std::env::var("IPSDOC_CORPUS").expect("IPSDOC_CORPUS names the corpus manifest");
     let limit = std::env::var("IPSDOC_CORPUS_LIMIT").map_or(usize::MAX, |n| n.parse().expect("a number"));
     let text = std::fs::read_to_string(&manifest).unwrap_or_else(|e| panic!("{manifest}: {e}"));
@@ -67,7 +73,7 @@ fn load() -> Vec<Stream> {
         let [container, path, offset, len, origin] = f[..] else {
             panic!("bad manifest line: {line}")
         };
-        if container != "acm" && container != "wavc" {
+        if !containers.contains(&container) {
             continue;
         }
         let (offset, len) = (offset.parse().unwrap(), len.parse().unwrap());
@@ -262,6 +268,36 @@ fn every_corpus_stream_re_encodes_losslessly() {
     report("FAIL", &t.failures);
     assert!(t.failures.is_empty(), "{} failures (by kind above)", t.failures.len());
     assert!(t.streams > 0, "no stream judged");
+}
+
+/// Every RIFF and Ogg stream in a corpus reads; reports what they hold.
+#[test]
+#[ignore = "needs IPSDOC_CORPUS"]
+fn every_corpus_riff_and_ogg_stream_reads() {
+    let streams = load_containers(&["riff", "ogg"]);
+    let kinds: Mutex<BTreeMap<String, u64>> = Mutex::new(BTreeMap::new());
+    let failures = Mutex::new(Vec::new());
+    for_each_parallel(&streams, |s| {
+        let bytes = read(&s.path, s.offset, s.len);
+        match ipsdoc::input::read(&bytes, &Default::default()) {
+            Ok(l) => {
+                let depth = l.audio.bits().map_or("float".to_owned(), |b| format!("{b}-bit"));
+                let kind = format!("{} {depth} {} Hz x{}", s.container, l.audio.rate, l.audio.channels);
+                *kinds.lock().unwrap().entry(kind).or_default() += 1;
+            }
+            Err(e) => failures
+                .lock()
+                .unwrap()
+                .push(format!("{} ({} copies): {e}: {:?}", s.origin, s.copies, e)),
+        }
+    });
+    for (kind, n) in kinds.into_inner().unwrap() {
+        eprintln!("{n:6} {kind}");
+    }
+    let failures = failures.into_inner().unwrap();
+    report("FAIL", &failures);
+    assert!(failures.is_empty(), "{} unreadable (by kind above)", failures.len());
+    assert!(!streams.is_empty(), "no stream judged");
 }
 
 #[test]
