@@ -9,44 +9,11 @@
 
 use std::io::{self, Read, Seek, SeekFrom};
 
-/// A sound container, by magic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Container {
-    /// Interplay ACM.
-    Acm,
-    /// WAVC V1: a 28-byte header over an ACM.
-    Wavc,
-    /// RIFF WAVE.
-    Riff,
-    /// Ogg (Vorbis in the games).
-    Ogg,
-}
+use ipsdoc::detect::{Format, detect};
 
-impl Container {
-    /// The manifest's name for the container.
-    pub fn name(self) -> &'static str {
-        match self {
-            Container::Acm => "acm",
-            Container::Wavc => "wavc",
-            Container::Riff => "riff",
-            Container::Ogg => "ogg",
-        }
-    }
-}
-
-/// The container of a stream starting with `head`, if it is a sound.
-pub fn sniff(head: &[u8]) -> Option<Container> {
-    if head.starts_with(&ipsdoc::acm::header::MAGIC) {
-        Some(Container::Acm)
-    } else if head.starts_with(b"WAVC") {
-        Some(Container::Wavc)
-    } else if head.starts_with(b"RIFF") {
-        Some(Container::Riff)
-    } else if head.starts_with(b"OggS") {
-        Some(Container::Ogg)
-    } else {
-        None
-    }
+/// The container of a stream starting with `head`, if it is a sound the games use.
+pub fn sniff(head: &[u8]) -> Option<Format> {
+    Some(detect(head)).filter(|&f| f != Format::Other)
 }
 
 /// One resource of a BIFF archive.
@@ -201,13 +168,9 @@ mod tests {
     }
 
     #[test]
-    fn sniffs_containers_by_magic() {
-        assert_eq!(sniff(&[0x97, 0x28, 0x03, 0x01, 0]), Some(Container::Acm));
-        assert_eq!(sniff(b"WAVCV1.0"), Some(Container::Wavc));
-        assert_eq!(sniff(b"RIFF\0\0\0\0WAVE"), Some(Container::Riff));
-        assert_eq!(sniff(b"OggS\0"), Some(Container::Ogg));
+    fn sniffs_only_sounds() {
+        assert_eq!(sniff(b"WAVCV1.0"), Some(Format::Wavc));
         assert_eq!(sniff(b"BIFFV1  "), None);
-        assert_eq!(sniff(b"Ri"), None);
     }
 
     #[test]

@@ -10,7 +10,8 @@ use std::io::{self, BufWriter, Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use corpus::{Container, biff_sounds, inflate_bif, sniff};
+use corpus::{biff_sounds, inflate_bif, sniff};
+use ipsdoc::detect::Format as Container;
 
 #[derive(Default)]
 struct Scan {

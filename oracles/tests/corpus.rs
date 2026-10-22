@@ -98,18 +98,17 @@ fn load() -> Vec<Stream> {
     streams
 }
 
-/// The bare ACM of a stream: WAVC holds it at a fixed 28 bytes, which is where GemRB looks.
+/// The bare ACM of a stream, through our WAVC reader. GemRB looks at a fixed 28 bytes, so a WAVC whose stated
+/// offset differs is reported.
 fn bare<'a>(container: &str, bytes: &'a [u8]) -> Result<&'a [u8], String> {
     if container == "acm" {
         return Ok(bytes);
     }
-    let at = bytes
-        .get(0x10..0x14)
-        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
-    match at {
-        Some(28) => Ok(&bytes[28..]),
-        other => Err(format!("WAVC with its ACM at {other:?}, not 28")),
+    let header = ipsdoc::wavc::Header::parse(bytes).map_err(|e| e.to_string())?;
+    if header.acm_offset != 28 {
+        return Err(format!("WAVC with its ACM at {}, not 28", header.acm_offset));
     }
+    ipsdoc::wavc::acm_of(bytes).map_err(|e| e.to_string())
 }
 
 fn judge(s: &Stream, tally: &Mutex<Tally>) {

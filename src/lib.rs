@@ -7,3 +7,6 @@
 //! Interplay ACM, WAVC and game sound file handling.
 
 pub mod acm;
+pub mod analysis;
+pub mod detect;
+pub mod wavc;
