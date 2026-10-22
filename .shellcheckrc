@@ -1,5 +1,4 @@
-# Canonical shellcheck config. COPY into the repo root as `.shellcheckrc` (the leading dot is dropped here so
-# the file is visible in this directory). shellcheck reads the nearest one walking up from each script.
+# shellcheck reads the nearest `.shellcheckrc` walking up from each script.
 #
 # shellcheck's default set is already good; the value of a config is the OPTIONAL checks, which are off by
 # default and have to be named one at a time. Run shellcheck at its default severity: the checks below report

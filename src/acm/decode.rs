@@ -71,6 +71,15 @@ pub enum DecodeError {
         /// The code.
         code: u32,
     },
+    /// The header's sample count needs more blocks than the input could hold, each block taking at least 20 bits
+    /// plus 5 per column: checked before decoding, so a corrupt header cannot drive a huge allocation.
+    #[error("the header needs {blocks} blocks; the input holds at most {fit}")]
+    TooManyBlocks {
+        /// Blocks the header needs.
+        blocks: u64,
+        /// Blocks that could begin within the input.
+        fit: u64,
+    },
     /// The input ends before a block the header's sample count needs begins.
     #[error("stream ends before block {block} of {blocks}")]
     Truncated {
@@ -115,6 +124,10 @@ pub fn decode_with(acm: &[u8], overflow: Overflow) -> Result<Decoded, DecodeErro
     let block_len = header.block_len();
     let total = header.samples as usize;
     let blocks = total.div_ceil(block_len) as u64;
+    let fit = total_bits.div_ceil(20 + 5 * cols as u64);
+    if blocks > fit {
+        return Err(DecodeError::TooManyBlocks { blocks, fit });
+    }
     let mut samples = Vec::with_capacity(total);
     let mut block = vec![0i32; block_len];
     let mut state = vec![0i32; 2 * (cols - 1)];
@@ -731,6 +744,25 @@ mod tests {
         let d = decode(&acm).unwrap();
         assert_eq!(d.samples, [-16384, -32768]);
         assert_eq!(d.stats.overflowed, 1);
+    }
+
+    #[test]
+    fn rejects_a_header_the_input_cannot_hold_before_allocating() {
+        // Four bytes of data under a header claiming 2^32 - 1 samples in blocks of 32768 x 4095.
+        let mut acm = Header {
+            samples: u32::MAX,
+            channels: 2,
+            rate: 22050,
+            levels: 15,
+            rows: 4095,
+        }
+        .to_bytes()
+        .to_vec();
+        acm.extend_from_slice(&[0; 4]);
+        assert_eq!(
+            decode(&acm).unwrap_err(),
+            DecodeError::TooManyBlocks { blocks: 33, fit: 1 }
+        );
     }
 
     #[test]

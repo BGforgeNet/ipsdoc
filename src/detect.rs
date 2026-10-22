@@ -29,7 +29,10 @@ impl Format {
     }
 }
 
-/// The container of a stream starting with `head`.
+/// The bytes [`detect`] looks at: a shorter `head` can miss a container (RIFF's form type sits at 8..12).
+pub const HEAD_LEN: usize = 12;
+
+/// The container of a stream starting with `head` (at least [`HEAD_LEN`] bytes of it, where the stream has them).
 pub fn detect(head: &[u8]) -> Format {
     if head.starts_with(&crate::acm::header::MAGIC) {
         Format::Acm

@@ -10,7 +10,7 @@ the ogg_next_sys and aotuv_lancer_vorbis_sys crates.
 
 Used by:
 {{#each used_by}}
-  - {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} ({{{crate.repository}}}){{/if}}
+  - {{{crate.name}}} {{{crate.version}}}{{#if crate.authors}}, by {{#each crate.authors}}{{#unless @first}}, {{/unless}}{{{this}}}{{/each}}{{/if}}{{#if crate.repository}} ({{{crate.repository}}}){{/if}}
 {{/each}}
 
 {{{text}}}

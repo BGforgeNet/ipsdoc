@@ -128,7 +128,9 @@ impl ChannelEvidence {
     /// effects read as interleaved mono yet play right as stereo (`tests/channel_detector.rs` counts them), so
     /// agreeing headers are trusted; disagreeing ones are settled as a bare ACM's would be, on a stereo claim.
     pub fn of_wavc(wavc_channels: u16, acm_channels: u16, samples: &[i16]) -> ChannelEvidence {
-        if wavc_channels == acm_channels {
+        if wavc_channels == 2 && acm_channels == 2 && samples.len() % 2 == 1 {
+            ChannelEvidence::OddSampleCount
+        } else if wavc_channels == acm_channels {
             ChannelEvidence::WavcHeaders
         } else {
             ChannelEvidence::of(wavc_channels.max(acm_channels), samples)
@@ -220,6 +222,14 @@ mod tests {
         let e = ChannelEvidence::of(1, &smooth(1000, 0.02, 0.005));
         assert_eq!(e, ChannelEvidence::HeaderMono);
         assert_eq!(e.channels(1), 1);
+    }
+
+    #[test]
+    fn agreeing_stereo_wavc_headers_over_an_odd_count_still_read_as_mono() {
+        // No whole number of stereo frames, whatever the headers say.
+        let e = ChannelEvidence::of_wavc(2, 2, &[1, 2, 3]);
+        assert_eq!(e, ChannelEvidence::OddSampleCount);
+        assert_eq!(e.channels(2), 1);
     }
 
     #[test]

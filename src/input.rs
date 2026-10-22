@@ -140,6 +140,14 @@ pub fn read(bytes: &[u8], opts: &ReadOptions) -> Result<Loaded, InputError> {
     if let Some(r) = opts.rate {
         loaded.audio.rate = r;
     }
+    // The notes report what is used, overrides included.
+    for n in &mut loaded.notes {
+        match n {
+            Note::Channels { used, .. } => *used = loaded.audio.channels,
+            Note::SwappedRate { used, .. } => *used = loaded.audio.rate,
+            Note::Overflowed { .. } => {}
+        }
+    }
     Ok(loaded)
 }
 
@@ -386,6 +394,16 @@ mod tests {
         };
         let l = read(&b, &opts).unwrap();
         assert_eq!((l.audio.channels, l.audio.rate), (2, 22050));
+        // The notes say what was used.
+        assert!(l.notes.contains(&Note::Channels {
+            header: 2,
+            used: 2,
+            evidence: ChannelEvidence::OddSampleCount
+        }));
+        assert!(l.notes.contains(&Note::SwappedRate {
+            stored: 17580,
+            used: 22050
+        }));
     }
 
     #[test]

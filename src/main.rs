@@ -272,32 +272,40 @@ fn info(path: &Path) -> Result<(), Failure> {
     Ok(())
 }
 
-/// Every file under `path` (or `path` itself), sorted.
-fn files_under(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), Failure> {
-    if path.is_dir() {
-        let mut entries: Vec<PathBuf> = std::fs::read_dir(path)
-            .map_err(|e| fail(1, format!("{}: {e}", path.display())))?
-            .map(|e| {
-                e.map(|e| e.path())
-                    .map_err(|e| fail(1, format!("{}: {e}", path.display())))
-            })
-            .collect::<Result<_, _>>()?;
-        entries.sort();
-        for e in entries {
-            files_under(&e, out)?;
-        }
-    } else {
+/// Every file under `path` (or `path` itself), sorted; a directory that cannot be listed goes to `errors`.
+fn files_under(path: &Path, out: &mut Vec<PathBuf>, errors: &mut Vec<String>) {
+    if !path.is_dir() {
         out.push(path.to_path_buf());
+        return;
     }
-    Ok(())
+    let mut entries = Vec::new();
+    match std::fs::read_dir(path) {
+        Ok(listing) => {
+            for e in listing {
+                match e {
+                    Ok(e) => entries.push(e.path()),
+                    Err(e) => errors.push(format!("{}: {e}", path.display())),
+                }
+            }
+        }
+        Err(e) => errors.push(format!("{}: {e}", path.display())),
+    }
+    entries.sort();
+    for e in entries {
+        files_under(&e, out, errors);
+    }
 }
 
 fn check(paths: &[PathBuf]) -> Result<(), Failure> {
     let (mut checked, mut failed) = (0u64, 0u64);
     for p in paths {
         let explicit = !p.is_dir();
-        let mut files = Vec::new();
-        files_under(p, &mut files)?;
+        let (mut files, mut errors) = (Vec::new(), Vec::new());
+        files_under(p, &mut files, &mut errors);
+        for e in &errors {
+            eprintln!("{e}");
+        }
+        failed += errors.len() as u64;
         for f in files {
             let bytes = match std::fs::read(&f) {
                 Ok(b) => b,
@@ -329,7 +337,14 @@ fn check(paths: &[PathBuf]) -> Result<(), Failure> {
 fn repair_files(files: &[PathBuf], dry_run: bool) -> Result<(), Failure> {
     let mut failed = 0;
     for f in files {
-        let mut bytes = read_file(f)?;
+        let mut bytes = match read_file(f) {
+            Ok(b) => b,
+            Err(Failure(_, message)) => {
+                eprintln!("{message}");
+                failed += 1;
+                continue;
+            }
+        };
         let fixes = match repair::fixes(&bytes) {
             Ok(x) => x,
             Err(e) => {
@@ -347,7 +362,10 @@ fn repair_files(files: &[PathBuf], dry_run: bool) -> Result<(), Failure> {
         }
         if !dry_run {
             repair::apply(&mut bytes, &fixes);
-            std::fs::write(f, &bytes).map_err(|e| fail(1, format!("{}: {e}", f.display())))?;
+            if let Err(e) = std::fs::write(f, &bytes) {
+                eprintln!("{}: {e}", f.display());
+                failed += 1;
+            }
         }
     }
     if failed > 0 {
@@ -357,11 +375,27 @@ fn repair_files(files: &[PathBuf], dry_run: bool) -> Result<(), Failure> {
     }
 }
 
+/// `info` for each file; a file that fails is reported and the rest still shown.
+fn info_files(files: &[PathBuf]) -> Result<(), Failure> {
+    let mut failed = 0;
+    for f in files {
+        if let Err(Failure(_, message)) = info(f) {
+            eprintln!("{message}");
+            failed += 1;
+        }
+    }
+    if failed > 0 {
+        Err(fail(1, format!("{failed} unreadable")))
+    } else {
+        Ok(())
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match (&cli.command, &cli.convert) {
         (Some(Command::Convert(a)), _) | (None, Some(a)) => convert(a),
-        (Some(Command::Info { files }), _) => files.iter().try_for_each(|f| info(f)),
+        (Some(Command::Info { files }), _) => info_files(files),
         (Some(Command::Check { paths }), _) => check(paths),
         (Some(Command::Repair { dry_run, files }), _) => repair_files(files, *dry_run),
         (None, None) => Err(fail(2, "nothing to do; see --help")),

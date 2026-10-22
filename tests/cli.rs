@@ -128,7 +128,10 @@ fn converts_to_ogg_and_resamples() {
     ok(&ipsdoc(&["convert", s(&src), s(&ogg), "--quality", "3"]));
     assert_eq!((load(&ogg).rate, load(&ogg).channels), (22050, 2));
     ok(&ipsdoc(&["convert", s(&src), s(&wav), "--rate", "44100"]));
-    assert_eq!((load(&wav).rate, load(&wav).frames()), (44100, 44100));
+    assert_eq!(
+        (load(&wav).rate, load(&wav).frames(), load(&wav).bits()),
+        (44100, 44100, Some(16))
+    );
 }
 
 #[test]
@@ -170,7 +173,14 @@ fn info_reports_headers_and_findings() {
     let src = d.path("speech.acm");
     std::fs::write(&src, ipsdoc::acm::encode(&[1, 2, 3], 2, 17580).unwrap()).unwrap();
     let text = ok(&ipsdoc(&["info", s(&src)]));
-    for needle in ["acm", "17580", "44100", "odd sample count", "channels"] {
+    for needle in [
+        "ACM: 3 samples, 2 channels, 17580 Hz",
+        "reads as: 1 channels, 44100 Hz",
+        "header 2, reads as 1 (odd sample count)",
+        "rate 17580 is 44100 byte-swapped",
+        "wrong: ACM channels is 2, should be 1",
+        "wrong: ACM rate is 17580, should be 44100",
+    ] {
         assert!(text.contains(needle), "{needle:?} missing from:\n{text}");
     }
 }
@@ -204,6 +214,46 @@ fn repair_fixes_headers_in_place_and_dry_run_does_not() {
     let h = ipsdoc::acm::Header::parse(&std::fs::read(&src).unwrap()).unwrap();
     assert_eq!((h.channels, h.rate), (1, 44100));
     assert_eq!(std::fs::read(&src).unwrap()[14..], original[14..]);
+}
+
+#[test]
+fn info_and_repair_go_on_past_a_bad_file() {
+    let d = Dir::new();
+    let good = d.path("good.acm");
+    std::fs::write(&good, ipsdoc::acm::encode(&[1, 2, 3], 2, 22050).unwrap()).unwrap();
+    let missing = d.path("missing.acm");
+    let out = ipsdoc(&["info", s(&missing), s(&good)]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("good.acm"),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let out = ipsdoc(&["repair", s(&missing), s(&good)]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        ipsdoc::acm::Header::parse(&std::fs::read(&good).unwrap())
+            .unwrap()
+            .channels,
+        1
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn check_goes_on_past_an_unreadable_directory() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = Dir::new();
+    put(&d.path("good.acm"), &stereo(), OutputFormat::Acm);
+    let locked = d.path("locked");
+    std::fs::create_dir(&locked).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let out = ipsdoc(&["check", s(&d.0)]);
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert!(text.contains("1 sounds checked"), "{text}");
+    assert!(text.contains("locked"), "{text}");
 }
 
 #[test]

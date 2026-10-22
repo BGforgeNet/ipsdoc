@@ -81,8 +81,8 @@ impl Audio {
         }
     }
 
-    /// The audio at another rate, as float samples (a fixed-ratio FFT resampler, with its delay trimmed); at the
-    /// same rate, unchanged.
+    /// The audio at another rate, at the source's depth (integer samples are dithered back to it), through a
+    /// fixed-ratio FFT resampler with its delay trimmed; at the same rate, unchanged.
     ///
     /// # Errors
     ///
@@ -104,11 +104,23 @@ impl Audio {
             rubato::FixedSync::Input,
         )?;
         let adapter = InterleavedSlice::new(&input[..frames * channels], channels, frames)?;
-        let out = r.process_all(&adapter, frames, None)?;
+        let out = r.process_all(&adapter, frames, None)?.take_data();
+        let samples = match self.bits() {
+            None => Samples::Float(out),
+            Some(bits) => {
+                let mut dither = Dither(0x9E37_79B9_7F4A_7C15);
+                let scale = f64::from(1u32 << (bits - 1));
+                let data = out
+                    .iter()
+                    .map(|&v| dither.quantise_to(f64::from(v) * scale, bits) << (32 - bits))
+                    .collect();
+                Samples::Int { bits, data }
+            }
+        };
         Ok(Audio {
             rate,
             channels: self.channels,
-            samples: Samples::Float(out.take_data()),
+            samples,
         })
     }
 }
@@ -140,8 +152,14 @@ impl Dither {
 
     /// `v` (in 16-bit steps) plus triangular noise, rounded and clamped.
     fn quantise(&mut self, v: f64) -> i16 {
+        self.quantise_to(v, 16) as i16
+    }
+
+    /// `v` (in steps of a `bits`-bit sample) plus triangular noise, rounded and clamped to `bits` bits.
+    fn quantise_to(&mut self, v: f64, bits: u16) -> i32 {
         let noise = self.uniform() - self.uniform();
-        (v + noise).round().clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16
+        let top = f64::from(1u32 << (bits - 1));
+        (v + noise).round().clamp(-top, top - 1.0) as i32
     }
 }
 
@@ -224,6 +242,18 @@ mod tests {
             let expected = 10000.0 / 32768.0 * (frame as f64 * 441.0 * std::f64::consts::TAU / 44100.0).sin();
             assert!((f64::from(y[2 * frame]) - expected).abs() < 0.01, "frame {frame}");
         }
+    }
+
+    #[test]
+    fn resampling_keeps_the_source_depth() {
+        let a = Audio::from_i16(22050, 1, (0..4000).map(|n| (n * 7 % 2000) as i16 - 1000).collect());
+        assert_eq!(a.resample(44100).unwrap().bits(), Some(16));
+        let f = Audio {
+            rate: 22050,
+            channels: 1,
+            samples: Samples::Float(vec![0.0; 4000]),
+        };
+        assert_eq!(f.resample(44100).unwrap().bits(), None);
     }
 
     #[test]

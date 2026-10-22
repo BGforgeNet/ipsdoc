@@ -58,23 +58,30 @@ fn row(
     )
 }
 
+const HEAD: u64 = ipsdoc::detect::HEAD_LEN as u64;
+
+/// Up to `max` bytes from `f`'s position, however the reads split.
+fn read_head(f: &mut File, max: u64) -> io::Result<Vec<u8>> {
+    let mut b = Vec::new();
+    Read::take(f, max).read_to_end(&mut b)?;
+    Ok(b)
+}
+
 fn scan_file(path: &Path, out: &mut Out, scan: &mut Scan) -> io::Result<()> {
     scan.files += 1;
     let mut f = File::open(path)?;
     let len = f.metadata()?.len();
-    let mut head = [0u8; 8];
-    let n = f.read(&mut head)?;
-    let head = &head[..n];
-    if let Some(c) = sniff(head) {
+    let head_bytes = read_head(&mut f, HEAD)?;
+    if let Some(c) = sniff(&head_bytes) {
         return row(out, scan, c, path, 0, len, "-");
     }
+    let head = head_bytes.get(..8).unwrap_or(&head_bytes);
     if head == b"BIFFV1  " {
         scan.archives += 1;
         for e in biff_sounds(&mut f)?.unwrap_or_default() {
             f.seek(SeekFrom::Start(e.offset))?;
-            let mut magic = [0u8; 4];
-            let k = f.read(&mut magic[..e.len.min(4) as usize])?;
-            match sniff(&magic[..k]) {
+            let magic = read_head(&mut f, e.len.min(HEAD))?;
+            match sniff(&magic) {
                 Some(c) => row(out, scan, c, path, e.offset, e.len, &format!("#{}", e.index))?,
                 None => scan.unknown_entries += 1,
             }

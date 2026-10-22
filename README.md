@@ -10,7 +10,7 @@ Usage: `ipsdoc sound.wav sound.acm`
 
 | Command | Does |
 |---|---|
-| `ipsdoc IN [OUT]`, `ipsdoc convert IN [OUT]` | Converts. Without `OUT`: an ACM or WAVC becomes a `.wav`, anything else an `.acm`, beside the input. |
+| `ipsdoc IN [OUT]`, `ipsdoc convert IN [OUT]` | Converts. Without `OUT`: an ACM or WAVC becomes a `.wav`, anything else an `.acm`, beside the input (a WAVC already named `.wav` needs an `OUT`). |
 | `ipsdoc info FILE...` | Shows the headers, how the file reads, and which header fields are wrong. |
 | `ipsdoc check PATH...` | Decodes every sound (directories recursively); fails if any does not decode. |
 | `ipsdoc repair [--dry-run] FILE...` | Fixes wrong ACM and WAVC header fields in place, without re-encoding. |
@@ -42,8 +42,10 @@ Formats are recognised by content, not by name: an Infinity Engine `.wav` may ho
 - **True headers.** Written files state their real rate and channel count.
 - **Channels.** Fallout ignores the ACM channel field, so most of its speech and effects say stereo and are mono. A
   stereo header over an odd number of samples, or over content that reads as one signal interleaved, is read as
-  mono. A WAVC whose two headers agree is trusted, as Infinity Engine players trust it. Fallout's ambient `wind1`,
-  `wind2` (Fallout 2) and `alarm1`, `alarm2` (Fallout 1) read as mono but play as stereo: use `--channels 2`.
+  mono. A WAVC whose two headers agree is trusted, as Infinity Engine players trust it, unless its sample count is
+  odd. Known misreadings: Fallout's ambient `wind1`, `wind2` (Fallout 2) and `alarm1`, `alarm2` (Fallout 1) read as
+  mono but play as stereo (use `--channels 2`); Fallout 2's `engineon` reads as stereo but plays as mono (use
+  `--channels 1`).
 - **Rates.** A rate stored byte-swapped (17580 for 44100, as in some music packs) is read as meant; `repair` fixes it.
 - **Overflow.** Lossy ACMs sometimes hold a sample beyond 16 bits. The games wrap it to the other end of the range,
   an audible click; ipsdoc clamps it, and `info` counts them. `--wrap` reproduces the games exactly.
