@@ -1,0 +1,17 @@
+Third-party software in ipsdoc
+
+ipsdoc is distributed under the GNU General Public License, version 3 (LICENSE). It includes the following
+software, under the licences below. libogg and libvorbis (with the aoTuV and Lancer changes) are compiled in, through
+the ogg_next_sys and aotuv_lancer_vorbis_sys crates.
+{{#each licenses}}
+
+================================================================================
+{{{name}}} ({{{id}}})
+
+Used by:
+{{#each used_by}}
+  - {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} ({{{crate.repository}}}){{/if}}
+{{/each}}
+
+{{{text}}}
+{{/each}}

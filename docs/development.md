@@ -1,6 +1,7 @@
 # Development
 
-The gate is the set of commands in `.github/workflows/rust.yml`; run them locally before a commit.
+The gate is the set of commands in `.github/workflows/build.yml` (jobs `lint`, `test`, `oracles`); run them locally
+before a commit.
 
 ## Reference decoders
 
@@ -22,12 +23,23 @@ transformed files.
 
 The `corpus` tool lists every sound stream under some directories (game installs, mod trees): loose files by
 magic, and the WAV resources of BIFF archives, compressed ones extracted into a directory of your choice. Fallout DAT
-archives are not read; extract their `.acm` files first (`dat3 x`). Then the corpus test decodes every unique ACM
-and WAVC stream in ours and in every reference decoder, and fails on any difference:
+archives are not read; extract their `.acm` files first (`dat3 x`).
 
 ```sh
-cargo run --release -p corpus -- /path/to/manifest.tsv /path/to/extracted /path/to/games ...
+cargo run --release -p corpus --bin corpus -- /path/to/manifest.tsv /path/to/extracted /path/to/games ...
 IPSDOC_CORPUS=/path/to/manifest.tsv IPSDOC_ORACLES=/path/to/oracles cargo test --release -p oracles --test corpus -- --ignored --nocapture
 ```
 
+The corpus tests check that every unique ACM and WAVC stream decodes in ours exactly as in the engines' decoders,
+re-encodes losslessly (also read back by the Fallout 2 engine's decoder), and that every RIFF and Ogg stream reads.
 `IPSDOC_CORPUS_LIMIT=N` judges only the first N unique streams.
+
+`cargo run --release -p corpus --bin features -- /path/to/manifest.tsv` writes the channel detector's labelled
+feature vectors, as committed in `tests/data/channel-features.tsv`.
+
+## Other encoders
+
+The `snd2acm` and `cross-tools` CI jobs compare with Interplay's `snd2acm.exe` (on Windows, `oracles/snd2acm.sh`)
+and AcmTools (built from source, `oracles/cross-tools.sh`): their output decodes in ours as in the engines, and
+AcmTools' decoder reads our lossless files exactly. The fixtures come from `cargo run -p oracles --bin fixtures --
+<dir>`; `oracles/tests/tools.rs` describes the directory the comparison reads.

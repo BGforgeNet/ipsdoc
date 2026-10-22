@@ -1,8 +1,1 @@
-*.acm
-*.wav
-*.exe
-__pycache__/
-build/
-dist/
-ipsdoc.spec
 /target/

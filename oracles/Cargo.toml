@@ -14,6 +14,8 @@ workspace = true
 [dependencies]
 infinitier_acm_decoder = "=0.0.14"
 infinitier_datasource = "=0.0.14"
+# The fixtures tool writes its WAVs through ipsdoc.
+ipsdoc = { path = ".." }
 
 [dev-dependencies]
-ipsdoc = { path = ".." }
+infinitier_acm_encoder = "=0.0.14"

@@ -287,6 +287,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "infinitier_acm_encoder"
+version = "0.0.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b451434cd1b475d3c25c7c346f1fd0186c7aef2ac0a2e125829eac38e4bf94d"
+dependencies = [
+ "hound",
+ "log",
+ "thiserror",
+]
+
+[[package]]
 name = "infinitier_datasource"
 version = "0.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -405,6 +416,7 @@ name = "oracles"
 version = "0.0.0"
 dependencies = [
  "infinitier_acm_decoder",
+ "infinitier_acm_encoder",
  "infinitier_datasource",
  "ipsdoc",
 ]

@@ -1,45 +1,196 @@
 name: build
 
-on: [push]
+on:
+  push:
+  pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Never cancel tag (release) runs; superseded branch runs are cancelled.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+# The toolchain comes from rust-toolchain.toml, which rustup on every runner honours.
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # persist-credentials: false - nothing here pushes, and the token would stay in .git/config for later steps.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-deny,cargo-machete
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - run: cargo deny --workspace check
+      - run: cargo machete
+      - run: shellcheck oracles/*.sh
+
+  test:
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: windows-latest
           - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          # GNU, not MSVC: the Vorbis encoder's bundled C build is tested upstream only there.
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ${{ matrix.target }}
+      - run: rustup target add ${{ matrix.target }}
+      - run: cargo test --workspace --exclude oracles --all-features --locked --target ${{ matrix.target }}
 
-      - name: Build and package
-        run: |
-          set -xeu -o pipefail
-          pip install -r requirements.txt
-          pyinstaller -F ipsdoc.py
+  # Builds the reference decoders from their pinned upstream sources and checks them against each other.
+  oracles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: echo "IPSDOC_ORACLES=$RUNNER_TEMP/oracles" >> "$GITHUB_ENV"
+      - run: oracles/build.sh "$IPSDOC_ORACLES"
+      - run: cargo test -p oracles --locked
+
+  # Interplay's snd2acm.exe, which the Python tool wrapped, encodes the cross-tool fixtures.
+  snd2acm:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
         shell: bash
-
-      - name: Upload artifacts - exe
-        uses: actions/upload-artifact@v2
-        if: "!startsWith(github.ref, 'refs/tags/') && (matrix.os == 'windows-latest')"
+    steps:
+      # Full history: the executable is read from the Python tool's last commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: ipsdoc.exe
-          path: dist/ipsdoc.exe
-
-      - name: Upload artifacts - linux bin
-        uses: actions/upload-artifact@v2
-        if: "!startsWith(github.ref, 'refs/tags/') && (matrix.os == 'ubuntu-latest')"
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          name: ipsdoc
-          path: dist/ipsdoc
-
-      - name: Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: |
-            dist/ipsdoc
-            dist/ipsdoc.exe
+          key: snd2acm
+      - run: rustup target add x86_64-pc-windows-gnu
+      - run: oracles/snd2acm.sh "$RUNNER_TEMP/tools"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_BUILD_TARGET: x86_64-pc-windows-gnu
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: snd2acm
+          path: ${{ runner.temp }}/tools/snd2acm
+          if-no-files-found: error
+
+  # Other encoders' output decodes in ours as in the engines; AcmTools' decoder reads our lossless files.
+  cross-tools:
+    needs: snd2acm
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          repository: FalloutBoy2099/AcmTools
+          ref: 98ce40c0d6168ee052c6deca325eded0615375b4
+          path: acmtools-src
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: |
+          echo "IPSDOC_ORACLES=$RUNNER_TEMP/oracles" >> "$GITHUB_ENV"
+          echo "IPSDOC_TOOLS=$RUNNER_TEMP/tools" >> "$GITHUB_ENV"
+      - run: oracles/build.sh "$IPSDOC_ORACLES"
+      - run: dotnet build acmtools-src/AcmTools.Cli -c Release
+      - run: oracles/cross-tools.sh "$IPSDOC_TOOLS" dotnet run --no-build -c Release --project acmtools-src/AcmTools.Cli --
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: snd2acm
+          path: ${{ runner.temp }}/tools/snd2acm
+      - run: cargo test -p oracles --locked --test tools -- --ignored --nocapture
+        env:
+          IPSDOC_TOOLS_REQUIRE: snd2acm,acmtools,acmtools-decoded
+
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            exe: ipsdoc
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+            exe: ipsdoc.exe
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            exe: ipsdoc
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: release-${{ matrix.target }}
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-about
+      - run: rustup target add ${{ matrix.target }}
+      - run: cargo build -p ipsdoc --release --locked --target ${{ matrix.target }}
+      - run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" LICENSE README.md dist/
+          cargo about generate --locked about.hbs -o dist/THIRD-PARTY-NOTICES.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ipsdoc-${{ matrix.target }}
+          path: dist
+          if-no-files-found: error
+
+  # Read-only everywhere else; only publishing a tag's release writes.
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [lint, test, oracles, cross-tools, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ipsdoc-*
+          path: dist
+      - run: |
+          cd dist
+          for d in ipsdoc-*; do (cd "$d" && zip -q -r "../$d.zip" .); done
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes ./*.zip
+        env:
+          GH_TOKEN: ${{ github.token }}

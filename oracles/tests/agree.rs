@@ -208,6 +208,47 @@ fn check_against_engine(name: &str, acm: &[u8], oracles: &[Oracle], samples: usi
         .collect()
 }
 
+/// Another encoder's output: its lossless modes decode to the input everywhere; its subband (lossy) mode decodes
+/// identically in ours and the engine-faithful decoders. `infinitier`'s own decoder is left out of the lossy check:
+/// it saturates where the engines wrap.
+#[test]
+fn infinitiers_encoder_output_decodes_as_in_the_engines() {
+    let inputs = [
+        ("speech", quiet_speech(3 * 22050, 6), 1u16),
+        ("noise", full_scale_noise(2 * 22050, 7), 2),
+        ("coefficients", coefficients(2 * 30000, 8), 2),
+    ];
+    let mut failures = Vec::new();
+    for (name, samples, channels) in &inputs {
+        let mut plain = Vec::new();
+        infinitier_acm_encoder::encode_pcm(samples, (*channels).into(), 22050, &mut plain).unwrap();
+        let mut packed = Vec::new();
+        infinitier_acm_encoder::encode_pcm_packed(samples, (*channels).into(), 22050, &mut packed).unwrap();
+        for (mode, acm) in [("plain", &plain), ("packed", &packed)] {
+            let oracles: &[Oracle] = if acm[12] & 0xF == 0 {
+                &LEVEL_0_ORACLES
+            } else {
+                &Oracle::ALL
+            };
+            failures.extend(
+                disagreements(acm, oracles, samples)
+                    .into_iter()
+                    .map(|f| format!("{name} {mode}: {f}")),
+            );
+        }
+        let mut subband = Vec::new();
+        infinitier_acm_encoder::encode_pcm_subband(samples, (*channels).into(), 22050, 7, 16, &mut subband).unwrap();
+        let engines = [Oracle::GemRb, Oracle::Libacm];
+        failures.extend(check_against_engine(
+            &format!("{name} subband"),
+            &subband,
+            &engines,
+            samples.len(),
+        ));
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 #[test]
 fn transformed_files_decode_identically_in_every_decoder() {
     let mut failures = Vec::new();
