@@ -128,10 +128,40 @@ use common::disagreements;
 /// files; `libacm_rejects_level_0` pins that.
 const LEVEL_0_ORACLES: [Oracle; 3] = [Oracle::Fallout2Ce, Oracle::GemRb, Oracle::Infinitier];
 
+/// Both the hand-built file and our encoder's output decode to `samples` in every decoder that reads level 0.
 fn check_lossless(name: &str, samples: &[i16], channels: u16, rate: u16) {
-    let acm = writer::encode(samples, channels, rate, 0, 256);
-    let failures = disagreements(&acm, &LEVEL_0_ORACLES, samples);
+    let hand = writer::encode(samples, channels, rate, 0, 256);
+    let ours = ipsdoc::acm::encode(samples, channels, rate).unwrap();
+    let mut failures = disagreements(&hand, &LEVEL_0_ORACLES, samples);
+    failures.extend(
+        disagreements(&ours, &LEVEL_0_ORACLES, samples)
+            .into_iter()
+            .map(|f| format!("our encoder: {f}")),
+    );
     assert!(failures.is_empty(), "{name}:\n{}", failures.join("\n"));
+}
+
+/// Material that drives our encoder to every small filler: blocks drawing from ranges of zero to five.
+#[test]
+fn our_encoders_small_fillers_decode_in_the_engines() {
+    let mut rng = Rng(9);
+    let s: Vec<i16> = (0..256 * 120)
+        .map(|n| {
+            let range = (n / 256 % 6) as u64;
+            let sparse = n / 256 % 12 >= 6;
+            if sparse && !rng.next().is_multiple_of(4) {
+                0
+            } else {
+                (rng.next() % (2 * range + 1)) as i16 - range as i16
+            }
+        })
+        .collect();
+    let acm = ipsdoc::acm::encode(&s, 1, 22050).unwrap();
+    let used = ipsdoc::acm::decode(&acm).unwrap().stats.fillers;
+    let failures = disagreements(&acm, &LEVEL_0_ORACLES, &s);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    // The material reached the small fillers (17 and up), so the engines decoded them.
+    assert!(used[17..30].iter().filter(|&&n| n > 0).count() >= 5, "{used:?}");
 }
 
 #[test]

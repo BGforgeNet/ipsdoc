@@ -192,22 +192,84 @@ fn report(label: &str, lines: &[String]) {
     }
 }
 
-#[test]
-#[ignore = "needs IPSDOC_CORPUS and IPSDOC_ORACLES"]
-fn every_corpus_stream_decodes_as_the_engines_decode() {
-    let streams = load();
-    let tally = Mutex::new(Tally::default());
+/// Runs `f` over `streams` on every core.
+fn for_each_parallel(streams: &[Stream], f: impl Fn(&Stream) + Sync) {
     let next = AtomicUsize::new(0);
     let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
     std::thread::scope(|scope| {
         for _ in 0..workers {
             scope.spawn(|| {
                 while let Some(s) = streams.get(next.fetch_add(1, Ordering::Relaxed)) {
-                    judge(s, &tally);
+                    f(s);
                 }
             });
         }
     });
+}
+
+#[derive(Default)]
+struct Sizes {
+    streams: u64,
+    original: u64,
+    lossless: u64,
+    pcm: u64,
+    failures: Vec<String>,
+}
+
+/// Re-encoding a real stream losslessly gives back its decoded samples, in ours and in the Fallout 2 engine's
+/// decoder; reports the sizes against 16-bit PCM and against the (lossy) originals.
+#[test]
+#[ignore = "needs IPSDOC_CORPUS and IPSDOC_ORACLES"]
+fn every_corpus_stream_re_encodes_losslessly() {
+    let streams = load();
+    let sizes = Mutex::new(Sizes::default());
+    for_each_parallel(&streams, |s| {
+        let name = format!("{} ({} copies)", s.origin, s.copies);
+        let bytes = read(&s.path, s.offset, s.len);
+        let fail = |m: String| sizes.lock().unwrap().failures.push(format!("{name}: {m}"));
+        let acm = match bare(&s.container, &bytes) {
+            Ok(a) => a,
+            Err(e) => return fail(e),
+        };
+        let decoded = match ipsdoc::acm::decode(acm) {
+            Ok(d) => d,
+            Err(e) => return fail(e.to_string()),
+        };
+        let h = decoded.header;
+        let lossless = ipsdoc::acm::encode(&decoded.samples, h.channels, h.rate).unwrap();
+        let again = ipsdoc::acm::decode(&lossless).map(|d| d.samples);
+        if again.as_ref() != Ok(&decoded.samples) {
+            return fail("our decoder does not give back what was encoded".into());
+        }
+        match Oracle::Fallout2Ce.decode(&lossless) {
+            Ok(e) if e == decoded.samples => {}
+            Ok(_) => return fail("the Fallout 2 engine's decoder reads our output differently".into()),
+            Err(e) => return fail(e.to_string()),
+        }
+        let mut t = sizes.lock().unwrap();
+        t.streams += 1;
+        t.original += acm.len() as u64;
+        t.lossless += lossless.len() as u64;
+        t.pcm += 2 * decoded.samples.len() as u64;
+    });
+    let t = sizes.into_inner().unwrap();
+    eprintln!(
+        "{} streams: lossless {:.3} of 16-bit PCM, {:.2} times the lossy originals",
+        t.streams,
+        t.lossless as f64 / t.pcm as f64,
+        t.lossless as f64 / t.original as f64
+    );
+    report("FAIL", &t.failures);
+    assert!(t.failures.is_empty(), "{} failures (by kind above)", t.failures.len());
+    assert!(t.streams > 0, "no stream judged");
+}
+
+#[test]
+#[ignore = "needs IPSDOC_CORPUS and IPSDOC_ORACLES"]
+fn every_corpus_stream_decodes_as_the_engines_decode() {
+    let streams = load();
+    let tally = Mutex::new(Tally::default());
+    for_each_parallel(&streams, |s| judge(s, &tally));
     let t = tally.into_inner().unwrap();
     let copies: u64 = streams.iter().map(|s| s.copies).sum();
     eprintln!(
