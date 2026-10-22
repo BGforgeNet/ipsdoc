@@ -1,0 +1,16 @@
+[package]
+name = "corpus"
+version = "0.0.0"
+description = "Lists the sound streams in game installs and mod trees, for corpus tests (development only)"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+flate2 = "=1.1.10"
+ipsdoc = { path = ".." }

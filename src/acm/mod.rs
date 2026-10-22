@@ -12,5 +12,5 @@ pub(crate) mod bitwriter;
 pub mod decode;
 pub mod header;
 
-pub use decode::{DecodeError, Decoded, Stats, decode};
+pub use decode::{DecodeError, Decoded, Overflow, Stats, decode, decode_with};
 pub use header::{Header, HeaderError};

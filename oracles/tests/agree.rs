@@ -121,40 +121,12 @@ fn quiet_speech(len: usize, seed: u64) -> Vec<i16> {
         .collect()
 }
 
+mod common;
+use common::disagreements;
+
 /// libacm rejects `levels = 0` outright (it requires a non-empty inter-block state), so it is no oracle for lossless
 /// files; `libacm_rejects_level_0` pins that.
 const LEVEL_0_ORACLES: [Oracle; 3] = [Oracle::Fallout2Ce, Oracle::GemRb, Oracle::Infinitier];
-
-/// Every decoder's output beside `expected`: ours and each of `oracles`. Returns one line per decoder that fails,
-/// differs in length, or differs in a sample (the first one). libacm and `infinitier` emit whole frames only, so on
-/// a stereo header with an odd sample count they end one sample early; the engines and ours do not.
-fn disagreements(acm: &[u8], oracles: &[Oracle], expected: &[i16]) -> Vec<String> {
-    let channels = usize::from(u16::from_le_bytes([acm[8], acm[9]])).max(1);
-    let whole_frames = expected.len() - expected.len() % channels;
-    let ours = ipsdoc::acm::decode(acm)
-        .map(|d| d.samples)
-        .map_err(|e| format!("ipsdoc: {e}"));
-    let theirs = oracles.iter().map(|&o| {
-        let len = if matches!(o, Oracle::Libacm | Oracle::Infinitier) {
-            whole_frames
-        } else {
-            expected.len()
-        };
-        (format!("{o:?}"), len, o.decode(acm).map_err(|e| e.to_string()))
-    });
-    std::iter::once(("ipsdoc".to_owned(), expected.len(), ours))
-        .chain(theirs)
-        .filter_map(|(name, len, result)| match result {
-            Err(e) => Some(e),
-            Ok(d) if d.len() != len => Some(format!("{name}: {} of {len} samples", d.len())),
-            Ok(d) => d
-                .iter()
-                .zip(expected)
-                .position(|(a, b)| a != b)
-                .map(|i| format!("{name}: differs at sample {i}: {} != {}", d[i], expected[i])),
-        })
-        .collect()
-}
 
 fn check_lossless(name: &str, samples: &[i16], channels: u16, rate: u16) {
     let acm = writer::encode(samples, channels, rate, 0, 256);

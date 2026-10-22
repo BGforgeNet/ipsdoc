@@ -1,6 +1,7 @@
-//! ACM decoding, sample for sample as the engines decode (the Fallout 2 engine and GemRB). Where they would read
-//! undefined data (an invalid filler, a code outside a filler's table, a dequantisation entry the block never set),
-//! decoding fails with the position instead.
+//! ACM decoding, sample for sample as the engines decode (the Fallout 2 engine and GemRB), except that a sample
+//! beyond 16 bits is clamped by default where the engines wrap it ([`Overflow`]). Where they would read undefined
+//! data (an invalid filler, a code outside a filler's table, a dequantisation entry the block never set), decoding
+//! fails with the position instead.
 
 use super::bitreader::BitReader;
 pub use super::header::{Header, HeaderError};
@@ -23,6 +24,8 @@ pub struct Stats {
     pub fillers: [u64; 32],
     /// Bits the final block reads past the end of the input, as zeros.
     pub overrun_bits: u64,
+    /// Samples beyond 16 bits, clamped or wrapped as the [`Overflow`] mode says.
+    pub overflowed: u64,
 }
 
 /// Why a stream cannot be decoded. `block` counts from 0; `bit` is the offset from the start of the input of the
@@ -78,12 +81,31 @@ pub enum DecodeError {
     },
 }
 
-/// Decodes a bare ACM stream (header first).
+/// What to do with a sample beyond 16 bits, which lossy encoders produce now and then on loud material.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Overflow {
+    /// Clip to the 16-bit range: a slightly flattened peak.
+    #[default]
+    Clamp,
+    /// Keep the low 16 bits, as the engines do: the sample jumps to the far end of the range, an audible click.
+    Wrap,
+}
+
+/// Decodes a bare ACM stream (header first), clamping overflowing samples.
 ///
 /// # Errors
 ///
 /// When the header is unreadable, the bitstream holds undefined codes, or it ends before its final block.
 pub fn decode(acm: &[u8]) -> Result<Decoded, DecodeError> {
+    decode_with(acm, Overflow::default())
+}
+
+/// Decodes a bare ACM stream (header first), treating overflowing samples as `overflow` says.
+///
+/// # Errors
+///
+/// As [`decode`].
+pub fn decode_with(acm: &[u8], overflow: Overflow) -> Result<Decoded, DecodeError> {
     let header = Header::parse(acm)?;
     let body = &acm[Header::LEN..];
     let total_bits = body.len() as u64 * 8;
@@ -105,7 +127,18 @@ pub fn decode(acm: &[u8]) -> Result<Decoded, DecodeError> {
             transform(&mut block, levels, rows, &mut state);
         }
         let take = block_len.min(total - samples.len());
-        samples.extend(block[..take].iter().map(|&v| (v >> levels) as i16));
+        for &v in &block[..take] {
+            let v = v >> levels;
+            let fits = i16::try_from(v);
+            if fits.is_err() {
+                stats.overflowed += 1;
+            }
+            samples.push(match (fits, overflow) {
+                (Ok(s), _) => s,
+                (Err(_), Overflow::Clamp) => v.clamp(i16::MIN.into(), i16::MAX.into()) as i16,
+                (Err(_), Overflow::Wrap) => v as i16,
+            });
+        }
     }
     stats.overrun_bits = r.overrun();
     Ok(Decoded { header, samples, stats })
@@ -657,6 +690,47 @@ mod tests {
         let d = decode(&acm).unwrap();
         assert_eq!(d.samples, [5, -2, 0, 0]);
         assert_eq!((d.stats.fillers[31], d.stats.fillers[0]), (1, 2));
+    }
+
+    fn overflow_stream() -> Vec<u8> {
+        // levels 1, one row: [32767, -32768] synthesises to (32768, 98303), >> 1: 16384 and 49151.
+        stream(1, 1, 2, |w| {
+            block_start(w, 15, 1);
+            for v in [32767, -32768i32] {
+                w.put(16, 5);
+                w.put((v + 32768) as u32, 16);
+            }
+        })
+    }
+
+    #[test]
+    fn clamps_an_overflowing_sample_by_default_and_counts_it() {
+        let d = decode(&overflow_stream()).unwrap();
+        assert_eq!(d.samples, [16384, 32767]);
+        assert_eq!(d.stats.overflowed, 1);
+    }
+
+    #[test]
+    fn wraps_an_overflowing_sample_as_the_engines_do() {
+        let d = decode_with(&overflow_stream(), Overflow::Wrap).unwrap();
+        // 49151 - 65536
+        assert_eq!(d.samples, [16384, -16385]);
+        assert_eq!(d.stats.overflowed, 1);
+    }
+
+    #[test]
+    fn clamps_below_as_well() {
+        // [-32768, 32767]: (-32767, -98302), >> 1: -16384 and -49151.
+        let acm = stream(1, 1, 2, |w| {
+            block_start(w, 15, 1);
+            for v in [-32768, 32767i32] {
+                w.put(16, 5);
+                w.put((v + 32768) as u32, 16);
+            }
+        });
+        let d = decode(&acm).unwrap();
+        assert_eq!(d.samples, [-16384, -32768]);
+        assert_eq!(d.stats.overflowed, 1);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "oracles"]
+members = [".", "corpus", "oracles"]
 # oracles' tests need the reference decoders that oracles/build.sh builds; plain cargo commands leave it out, and its
 # gate names it (`cargo test -p oracles`).
 default-members = ["."]
