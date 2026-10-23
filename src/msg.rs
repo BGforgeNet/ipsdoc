@@ -52,7 +52,7 @@ pub struct Found<'a> {
 ///
 /// When a field is unterminated, an entry is short, or an entry number is not a number.
 pub fn parse(bytes: &[u8]) -> Result<Vec<Entry>, MsgError> {
-    let text: String = bytes.iter().map(|&b| windows_1252(b)).collect();
+    let text = decode(bytes);
     // Each field with the line it starts on.
     let mut fields: Vec<(usize, String)> = Vec::new();
     let mut line = 1;
@@ -96,6 +96,11 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Entry>, MsgError> {
         });
     }
     Ok(entries)
+}
+
+/// Text in the English game's code page, Windows-1252 (message files, and the transcripts beside speech files).
+pub fn decode(bytes: &[u8]) -> String {
+    bytes.iter().map(|&b| windows_1252(b)).collect()
 }
 
 /// A Windows-1252 byte as a character; its five unassigned bytes read as the C1 controls of the same value.

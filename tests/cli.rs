@@ -263,3 +263,204 @@ fn a_missing_input_is_an_error() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("nope.wav"));
 }
+
+/// 0.2 s silence, 0.6 s of a voiced tone, 0.2 s silence, at 22050 Hz mono.
+fn speech() -> Audio {
+    let samples = (0..22050)
+        .map(|i| {
+            let t = f64::from(i) / 22050.0;
+            if (0.2..0.8).contains(&t) {
+                (9000.0 * (t * 150.0 * std::f64::consts::TAU).sin()) as i16
+            } else {
+                0
+            }
+        })
+        .collect();
+    Audio::from_i16(22050, 1, samples)
+}
+
+fn lip_at(path: &Path) -> ipsdoc::lip::Lip {
+    ipsdoc::lip::Lip::parse(&std::fs::read(path).unwrap()).unwrap()
+}
+
+/// Whether the lip file shows closed lips (m, p, b) anywhere.
+fn closes_lips(lip: &ipsdoc::lip::Lip) -> bool {
+    lip.phonemes
+        .iter()
+        .any(|&c| ipsdoc::lipgen::HEAD_FRAME[usize::from(c)] == 6)
+}
+
+fn all_output(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr)
+}
+
+#[test]
+fn lip_writes_a_lip_and_an_empty_txt_beside_the_sound() {
+    let d = Dir::new();
+    let src = d.path("x.acm");
+    put(&src, &speech(), OutputFormat::Acm);
+    let out = ipsdoc(&["lip", s(&src)]);
+    ok(&out);
+    assert!(all_output(&out).contains("audio only"), "{}", all_output(&out));
+    let lip = lip_at(&d.path("x.lip"));
+    assert_eq!(lip.last(), 2 * 22050);
+    assert_eq!(lip.name(), "X");
+    assert_eq!(std::fs::read(d.path("x.txt")).unwrap(), b"");
+    ok(&ipsdoc(&["check", s(&d.path("x.lip"))]));
+}
+
+#[test]
+fn lip_reads_the_line_from_a_msg() {
+    let d = Dir::new();
+    let src = d.path("x.acm");
+    put(&src, &speech(), OutputFormat::Acm);
+    let msg = d.path("dialog.msg");
+    std::fs::write(&msg, "{100}{}{You see a man.}\r\n{101}{X}{Map, be.}\r\n").unwrap();
+    let out = ipsdoc(&["lip", "--msg", s(&msg), s(&src)]);
+    ok(&out);
+    assert!(!all_output(&out).contains("audio only"), "{}", all_output(&out));
+    assert!(closes_lips(&lip_at(&d.path("x.lip"))));
+    // A sound the MSG has no line for: an error, and nothing written.
+    let other = d.path("y.acm");
+    put(&other, &speech(), OutputFormat::Acm);
+    let out = ipsdoc(&["lip", "--msg", s(&msg), s(&other)]);
+    assert_eq!(out.status.code(), Some(1), "{}", all_output(&out));
+    assert!(all_output(&out).contains("no line for y"), "{}", all_output(&out));
+    assert!(!d.path("y.lip").exists());
+}
+
+#[test]
+fn lip_warns_when_a_msg_names_the_sound_twice_with_other_text() {
+    let d = Dir::new();
+    let src = d.path("x.acm");
+    put(&src, &speech(), OutputFormat::Acm);
+    let msg = d.path("dialog.msg");
+    std::fs::write(&msg, "{1}{x}{Map, be.}{2}{x}{Hello.}").unwrap();
+    let out = ipsdoc(&["lip", "--msg", s(&msg), s(&src)]);
+    ok(&out);
+    assert!(all_output(&out).contains("other text"), "{}", all_output(&out));
+}
+
+#[test]
+fn lip_uses_a_transcript_beside_the_sound() {
+    let d = Dir::new();
+    let src = d.path("x.acm");
+    put(&src, &speech(), OutputFormat::Acm);
+    std::fs::write(d.path("x.txt"), "map be").unwrap();
+    let out = ipsdoc(&["lip", s(&src)]);
+    ok(&out);
+    assert!(!all_output(&out).contains("audio only"), "{}", all_output(&out));
+    assert!(closes_lips(&lip_at(&d.path("x.lip"))));
+    assert_eq!(
+        std::fs::read(d.path("x.txt")).unwrap(),
+        b"map be",
+        "the transcript stays"
+    );
+}
+
+#[test]
+fn lip_warns_on_a_rate_the_games_do_not_play_and_wants_one_input_for_an_output() {
+    let d = Dir::new();
+    let src = d.path("x.wav");
+    put(&src, &Audio::from_i16(48000, 1, speech().to_i16()), OutputFormat::Riff);
+    let out = ipsdoc(&["lip", s(&src)]);
+    ok(&out);
+    assert!(all_output(&out).contains("48000 Hz"), "{}", all_output(&out));
+    let out = ipsdoc(&["lip", "-o", s(&d.path("o.lip")), s(&src), s(&src)]);
+    assert_eq!(out.status.code(), Some(2), "{}", all_output(&out));
+}
+
+#[test]
+fn lip_rescale_fits_a_lip_to_another_sound() {
+    let d = Dir::new();
+    let (src, big) = (d.path("x.acm"), d.path("big.acm"));
+    put(&src, &speech(), OutputFormat::Acm);
+    let quad: Vec<i16> = speech().to_i16().iter().flat_map(|&v| [v, v, v, v]).collect();
+    put(&big, &Audio::from_i16(44100, 2, quad), OutputFormat::Acm);
+    ok(&ipsdoc(&["lip", s(&src)]));
+    let lip = d.path("x.lip");
+    ok(&ipsdoc(&["lip", "--rescale", s(&lip), "--for", s(&big)]));
+    assert_eq!(lip_at(&lip).last(), 8 * 22050);
+}
+
+#[test]
+fn check_compares_a_lip_with_its_sound() {
+    let d = Dir::new();
+    let src = d.path("x.acm");
+    put(&src, &speech(), OutputFormat::Acm);
+    ok(&ipsdoc(&["lip", s(&src)]));
+    let lip = d.path("x.lip");
+    ok(&ipsdoc(&["check", s(&lip)]));
+    let good = lip_at(&lip);
+    // Made for the sound at twice the samples.
+    let mut doubled = good.clone();
+    doubled.rescale(2 * good.last());
+    std::fs::write(&lip, doubled.to_bytes()).unwrap();
+    let out = ipsdoc(&["check", s(&lip)]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        all_output(&out).contains("another rate or channel count"),
+        "{}",
+        all_output(&out)
+    );
+    // Made for another recording.
+    let mut other = good.clone();
+    other.rescale(good.last() * 1005 / 1000);
+    std::fs::write(&lip, other.to_bytes()).unwrap();
+    let out = ipsdoc(&["check", s(&lip)]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(all_output(&out).contains("another recording"), "{}", all_output(&out));
+    // Within the rounding of a resample.
+    let mut close = good.clone();
+    close.rescale(good.last() + 2);
+    std::fs::write(&lip, close.to_bytes()).unwrap();
+    ok(&ipsdoc(&["check", s(&lip)]));
+}
+
+#[test]
+fn check_reports_a_truncated_lip_named_or_found() {
+    let d = Dir::new();
+    let src = d.path("x.acm");
+    put(&src, &speech(), OutputFormat::Acm);
+    ok(&ipsdoc(&["lip", s(&src)]));
+    let lip = d.path("x.lip");
+    let mut bytes = std::fs::read(&lip).unwrap();
+    bytes.truncate(bytes.len() - 3);
+    std::fs::write(&lip, bytes).unwrap();
+    let out = ipsdoc(&["check", s(&lip)]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(all_output(&out).contains("truncated"), "{}", all_output(&out));
+    let out = ipsdoc(&["check", s(&d.0)]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(all_output(&out).contains("x.lip"), "{}", all_output(&out));
+}
+
+#[test]
+fn repair_fixes_a_lip_length_field_only() {
+    let d = Dir::new();
+    let src = d.path("x.acm");
+    put(&src, &speech(), OutputFormat::Acm);
+    ok(&ipsdoc(&["lip", s(&src)]));
+    let lip = d.path("x.lip");
+    let mut wrong = lip_at(&lip);
+    wrong.len = 12345;
+    std::fs::write(&lip, wrong.to_bytes()).unwrap();
+    ok(&ipsdoc(&["repair", "--dry-run", s(&lip)]));
+    assert_eq!(lip_at(&lip).len, 12345);
+    ok(&ipsdoc(&["repair", s(&lip)]));
+    let fixed = lip_at(&lip);
+    assert_eq!(fixed.len, fixed.last());
+    assert_eq!(fixed.markers, wrong.markers);
+}
+
+#[test]
+fn info_shows_a_lip() {
+    let d = Dir::new();
+    let src = d.path("x.acm");
+    put(&src, &speech(), OutputFormat::Acm);
+    ok(&ipsdoc(&["lip", s(&src)]));
+    let text = ok(&ipsdoc(&["info", s(&d.path("x.lip"))]));
+    for needle in ["x.lip: lip", "name X", "1.000 s"] {
+        assert!(text.contains(needle), "{needle:?} missing from:\n{text}");
+    }
+}

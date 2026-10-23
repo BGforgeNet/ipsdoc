@@ -7,6 +7,8 @@
 
 /// Header size; phonemes start here.
 pub const HEADER_LEN: usize = 44;
+/// Where the length field (a big-endian `i32`) sits.
+pub const LEN_OFFSET: usize = 16;
 /// The only version read and written; version 1 is an engine save-file layout no shipped file uses.
 pub const VERSION: i32 = 2;
 /// The second header field, unused by the engine, in every original file.
@@ -145,6 +147,60 @@ impl Problem {
     }
 }
 
+impl std::fmt::Display for Problem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Problem::BadCodes { count, first } => {
+                write!(
+                    f,
+                    "{count} phoneme codes of {PHONEME_COUNT} or more, the first at {first}"
+                )
+            }
+            Problem::Backwards { index } => write!(f, "marker {index} is before the one preceding it"),
+            Problem::BadFirstMarker(m) => write!(f, "the first marker is ({}, {}), not (1, 0)", m.kind, m.position),
+            Problem::CountMismatch { phonemes, markers } => {
+                write!(
+                    f,
+                    "{markers} markers for {phonemes} phonemes (should be {})",
+                    phonemes + 1
+                )
+            }
+            Problem::FewMarkers(n) => write!(f, "{n} markers: the engine wants {} or more", FEW_MARKERS + 1),
+            Problem::Flags(v) => write!(f, "flags {v} (bit 0 loops the line)"),
+            Problem::Len { stored, last } => write!(f, "length field {stored}, the last marker is {last}"),
+            Problem::Name { stored, expected } => write!(f, "names sound {stored}, the file is {expected}"),
+        }
+    }
+}
+
+/// How a lip file's length (its last marker) fits a sound of `samples` interleaved samples.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Fit {
+    /// Made for this sound.
+    Matches,
+    /// Off by exactly this factor (2, 4, 1/2, 1/4): made for the sound at another rate or channel count.
+    Scaled(f64),
+    /// Off by this ratio: made for another recording.
+    Other(f64),
+}
+
+/// How `last` (a lip file's last marker) fits a sound of `samples` samples: within 0.01% or 2 bytes, whichever is
+/// more (resampling rounds the sample count).
+pub fn fit(last: i32, samples: usize) -> Fit {
+    let want = 2.0 * samples as f64;
+    let last = f64::from(last);
+    let near = |a: f64, b: f64| (a - b).abs() <= (b * 1e-4).max(2.0);
+    if near(last, want) {
+        return Fit::Matches;
+    }
+    for factor in [2.0, 4.0, 0.5, 0.25] {
+        if near(last, want * factor) {
+            return Fit::Scaled(factor);
+        }
+    }
+    Fit::Other(if want > 0.0 { last / want } else { f64::INFINITY })
+}
+
 fn read_i32(bytes: &[u8], at: usize) -> i32 {
     let mut b = [0; 4];
     b.copy_from_slice(&bytes[at..at + 4]);
@@ -213,7 +269,7 @@ impl Lip {
             field_04: read_i32(bytes, 4),
             flags: read_i32(bytes, 8),
             field_0c: read_i32(bytes, 12),
-            len: read_i32(bytes, 16),
+            len: read_i32(bytes, LEN_OFFSET),
             field_18: read_i32(bytes, 24),
             name,
             extension,
@@ -532,5 +588,63 @@ mod tests {
         }
         assert!(lip.markers.windows(2).all(|w| w[0].position <= w[1].position));
         assert_eq!(lip.last(), 2000);
+    }
+
+    #[test]
+    fn fits_by_the_last_marker() {
+        assert_eq!(fit(2000, 1000), Fit::Matches);
+        // Within 2 bytes on a short sound, within 0.01% on a long one.
+        assert_eq!(fit(2002, 1000), Fit::Matches);
+        assert_eq!(fit(2_000_150, 1_000_000), Fit::Matches);
+        assert_eq!(fit(4000, 1000), Fit::Scaled(2.0));
+        assert_eq!(fit(8002, 1000), Fit::Scaled(4.0));
+        assert_eq!(fit(1000, 1000), Fit::Scaled(0.5));
+        assert_eq!(fit(500, 1000), Fit::Scaled(0.25));
+        // 0.2% short, as Cassidy Head's adam_dravean files are of their sounds.
+        assert!(matches!(fit(1996, 1000), Fit::Other(r) if (r - 0.998).abs() < 1e-9));
+    }
+
+    #[test]
+    fn problems_read_as_sentences() {
+        let cases = [
+            (
+                Problem::BadCodes { count: 2, first: 1 },
+                "2 phoneme codes of 42 or more, the first at 1",
+            ),
+            (
+                Problem::Backwards { index: 3 },
+                "marker 3 is before the one preceding it",
+            ),
+            (
+                Problem::BadFirstMarker(marker(0, 0)),
+                "the first marker is (0, 0), not (1, 0)",
+            ),
+            (
+                Problem::CountMismatch {
+                    phonemes: 4,
+                    markers: 6,
+                },
+                "6 markers for 4 phonemes (should be 5)",
+            ),
+            (Problem::FewMarkers(5), "5 markers: the engine wants 6 or more"),
+            (Problem::Flags(1), "flags 1 (bit 0 loops the line)"),
+            (
+                Problem::Len {
+                    stored: 1999,
+                    last: 2000,
+                },
+                "length field 1999, the last marker is 2000",
+            ),
+            (
+                Problem::Name {
+                    stored: "MCS6A".to_owned(),
+                    expected: "mcs43alt".to_owned(),
+                },
+                "names sound MCS6A, the file is mcs43alt",
+            ),
+        ];
+        for (p, want) in cases {
+            assert_eq!(p.to_string(), want);
+        }
     }
 }

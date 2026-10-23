@@ -1,8 +1,8 @@
 ## Interplay sound doctor
 
 Converts, inspects, checks and repairs the sound files of Infinity Engine games (Baldur's Gate, Icewind Dale,
-Planescape: Torment) and Fallout 1 and 2: ACM, WAVC, and the RIFF WAV and Ogg Vorbis files their mods use. One
-self-contained program for Windows, Linux and macOS.
+Planescape: Torment) and Fallout 1 and 2: ACM, WAVC, and the RIFF WAV and Ogg Vorbis files their mods use. Writes and
+checks Fallout's lip-sync files. One self-contained program for Windows, Linux and macOS.
 
 Usage: `ipsdoc sound.wav sound.acm`
 
@@ -12,8 +12,10 @@ Usage: `ipsdoc sound.wav sound.acm`
 |---|---|
 | `ipsdoc IN [OUT]`, `ipsdoc convert IN [OUT]` | Converts. Without `OUT`: an ACM or WAVC becomes a `.wav`, anything else an `.acm`, beside the input (a WAVC already named `.wav` needs an `OUT`). |
 | `ipsdoc info FILE...` | Shows the headers, how the file reads, and which header fields are wrong. |
-| `ipsdoc check PATH...` | Decodes every sound (directories recursively); fails if any does not decode. |
-| `ipsdoc repair [--dry-run] FILE...` | Fixes wrong ACM and WAVC header fields in place, without re-encoding. |
+| `ipsdoc check PATH...` | Decodes every sound and checks every lip file (directories recursively); fails if any does not decode, or a lip file is broken or does not fit the ACM beside it. |
+| `ipsdoc repair [--dry-run] FILE...` | Fixes wrong ACM and WAVC header fields, and lip files' length fields, in place, without re-encoding. |
+| `ipsdoc lip SOUND... [--msg FILE]` | Writes a Fallout lip-sync file beside each speech sound, from its line in a dialog `.msg` (or a `.txt` beside it), or from the sound alone. |
+| `ipsdoc lip --rescale LIP --for SOUND` | Rescales a lip file to another sound (another rate or channel count of the same recording). |
 
 `convert` options: `--to acm|wavc|wav|ogg` (otherwise from the output's extension), `--rate R` (resample),
 `--channels N` and `--input-rate R` (read the input as having these, whatever its header says), `--quality Q`
@@ -30,6 +32,7 @@ Usage: `ipsdoc sound.wav sound.acm`
 | Ogg Vorbis | yes | yes (libvorbis with aoTuV) |
 | FLAC, MP3, AAC, ALAC | yes | no |
 | Headerless PCM | 8 or 16-bit | no |
+| Fallout lip sync (`.lip`) | version 2 | version 2 |
 
 Formats are recognised by content, not by name: an Infinity Engine `.wav` may hold RIFF, WAVC or Ogg Vorbis.
 
@@ -51,6 +54,16 @@ Formats are recognised by content, not by name: an Infinity Engine `.wav` may ho
   an audible click; ipsdoc clamps it, and `info` counts them. `--wrap` reproduces the games exactly.
 - **Other players.** FFmpeg-based players cannot play most ACMs, lossless ones never; libacm-based tools cannot open
   lossless ones.
+
+### Lip sync
+
+- **Positions.** A lip file's positions are bytes of the decoded sound: twice the sample index, all channels counted.
+  So a header fix never moves them; re-encoding at another rate or channel count does (`ipsdoc lip --rescale`).
+- **Text.** With the line's text (English), each word's sounds come from the CMU Pronouncing Dictionary, or
+  letter-to-sound rules for words it lacks, and are aligned to the speech by loudness. The dialog `.msg` names each
+  line's sound: `ipsdoc lip --msg dialog/vccasidy.msg cas0103.acm`. Without text, mouth shapes come from the sound.
+- **Checks.** A lip file names the sound the game loads for it, and its length must fit that sound; `check` reports
+  either mismatch, phoneme codes the original game misreads (42 and up), and markers out of order.
 
 ### Building
 
