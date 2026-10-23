@@ -415,7 +415,7 @@ fn clean(mut shapes: Vec<Shape>, total: f64, a: &speech::Analysis, p: &Params) -
         let Some(i) = short else { break };
         if v[i].frame() == CLOSED {
             let need = closed_hold - len(&v, i);
-            if len(&v, i + 1) - need >= hold && i + 2 <= v.len() {
+            if len(&v, i + 1) - need >= hold {
                 v[i + 1].start += need;
                 continue;
             }
