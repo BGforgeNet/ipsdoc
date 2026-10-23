@@ -79,11 +79,23 @@ pub enum RepairError {
 ///
 /// When the file is neither ACM nor WAVC, or does not read.
 pub fn fixes(bytes: &[u8]) -> Result<Repair, RepairError> {
-    let format = detect::detect(bytes);
+    if !matches!(detect::detect(bytes), detect::Format::Acm | detect::Format::Wavc) {
+        return Err(RepairError::NotRepairable);
+    }
+    fixes_read(bytes, &input::read(bytes, &ReadOptions::default())?)
+}
+
+/// [`fixes`] for a file already read: `loaded` is `bytes` as [`input::read`] reads them with default
+/// [`ReadOptions`], whose channel count is the one to store.
+///
+/// # Errors
+///
+/// When the file is neither ACM nor WAVC, or its headers do not read.
+pub fn fixes_read(bytes: &[u8], loaded: &input::Loaded) -> Result<Repair, RepairError> {
+    let format = loaded.format;
     if !matches!(format, detect::Format::Acm | detect::Format::Wavc) {
         return Err(RepairError::NotRepairable);
     }
-    let loaded = input::read(bytes, &ReadOptions::default())?;
     let channels = loaded.audio.channels;
     let wavc_header = match format {
         detect::Format::Wavc => Some(wavc::Header::parse(bytes).map_err(InputError::from)?),
@@ -313,6 +325,10 @@ mod tests {
             fixes(b"RIFF\0\0\0\0WAVEfmt "),
             Err(RepairError::NotRepairable)
         ));
+        let audio = crate::pcm::Audio::from_i16(22050, 1, vec![0; 4]);
+        let riff = crate::output::write(&audio, crate::output::OutputFormat::Riff, &Default::default()).unwrap();
+        let loaded = input::read(&riff, &ReadOptions::default()).unwrap();
+        assert!(matches!(fixes_read(&riff, &loaded), Err(RepairError::NotRepairable)));
     }
 
     #[test]

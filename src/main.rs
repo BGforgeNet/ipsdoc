@@ -325,7 +325,7 @@ fn info(path: &Path) -> Result<(), Failure> {
         println!("  note: {}", describe(n));
     }
     if matches!(format, Format::Acm | Format::Wavc)
-        && let Ok(r) = repair::fixes(&bytes)
+        && let Ok(r) = repair::fixes_read(&bytes, &loaded)
     {
         for f in r.fixes {
             println!(
