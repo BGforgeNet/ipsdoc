@@ -403,6 +403,12 @@ fn lip_rescale_fits_a_lip_to_another_sound() {
     let lip = d.path("x.lip");
     ok(&ipsdoc(&["lip", "--rescale", s(&lip), "--for", s(&big)]));
     assert_eq!(lip_at(&lip).last(), 8 * 22050);
+    // Replaced through a sibling file, which is gone afterwards.
+    let left: Vec<_> = std::fs::read_dir(&d.0)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(left.len(), 4, "{left:?}");
 }
 
 #[test]

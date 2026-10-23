@@ -170,6 +170,19 @@ fn read_file(path: &Path) -> Result<Vec<u8>, Failure> {
     std::fs::read(path).map_err(|e| fail(1, format!("{}: {e}", path.display())))
 }
 
+/// Replaces the file at `path` with `bytes` through a sibling file renamed over it, so a failure leaves the original.
+fn replace_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".ipsdoc-tmp");
+    let tmp = PathBuf::from(tmp);
+    let written = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path));
+    if written.is_err() {
+        // Best effort: the original is intact either way, and the write error is what the caller reports.
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
+}
+
 fn convert(a: &ConvertArgs) -> Result<(), Failure> {
     let bytes = read_file(&a.input)?;
     let output = match &a.output {
@@ -311,9 +324,9 @@ fn info(path: &Path) -> Result<(), Failure> {
         println!("  note: {}", describe(n));
     }
     if matches!(format, Format::Acm | Format::Wavc)
-        && let Ok(fixes) = repair::fixes(&bytes)
+        && let Ok(r) = repair::fixes(&bytes)
     {
-        for f in fixes {
+        for f in r.fixes {
             println!(
                 "  wrong: {} is {}, should be {} (ipsdoc repair)",
                 field_name(f.field),
@@ -398,7 +411,7 @@ fn check(paths: &[PathBuf]) -> Result<(), Failure> {
 fn repair_files(files: &[PathBuf], dry_run: bool) -> Result<(), Failure> {
     let mut failed = 0;
     for f in files {
-        let mut bytes = match read_file(f) {
+        let bytes = match read_file(f) {
             Ok(b) => b,
             Err(Failure(_, message)) => {
                 eprintln!("{message}");
@@ -407,12 +420,12 @@ fn repair_files(files: &[PathBuf], dry_run: bool) -> Result<(), Failure> {
             }
         };
         if lip::looks_like(&bytes) {
-            if !repair_lip(f, &mut bytes, dry_run) {
+            if !repair_lip(f, &bytes, dry_run) {
                 failed += 1;
             }
             continue;
         }
-        let fixes = match repair::fixes(&bytes) {
+        let r = match repair::fixes(&bytes) {
             Ok(x) => x,
             Err(e) => {
                 eprintln!("{}: {}", f.display(), chain(&e));
@@ -420,19 +433,16 @@ fn repair_files(files: &[PathBuf], dry_run: bool) -> Result<(), Failure> {
                 continue;
             }
         };
-        if fixes.is_empty() {
+        if r.fixes.is_empty() {
             println!("{}: nothing to repair", f.display());
             continue;
         }
-        for x in &fixes {
+        for x in &r.fixes {
             println!("{}: {} {} -> {}", f.display(), field_name(x.field), x.stored, x.correct);
         }
-        if !dry_run {
-            repair::apply(&mut bytes, &fixes);
-            if let Err(e) = std::fs::write(f, &bytes) {
-                eprintln!("{}: {e}", f.display());
-                failed += 1;
-            }
+        if !dry_run && let Err(e) = repair::write(f, &r.patches) {
+            eprintln!("{}: {e}", f.display());
+            failed += 1;
         }
     }
     if failed > 0 {
@@ -578,7 +588,7 @@ fn check_lip(path: &Path, bytes: &[u8]) -> bool {
 }
 
 /// Sets a lip file's length field to its last marker, in place; reports anything else. Returns whether it read.
-fn repair_lip(path: &Path, bytes: &mut [u8], dry_run: bool) -> bool {
+fn repair_lip(path: &Path, bytes: &[u8], dry_run: bool) -> bool {
     let l = match Lip::parse(bytes) {
         Ok(l) => l,
         Err(e) => {
@@ -591,12 +601,13 @@ fn repair_lip(path: &Path, bytes: &mut [u8], dry_run: bool) -> bool {
         println!("{}: nothing to repair", path.display());
     } else {
         println!("{}: lip length field {} -> {}", path.display(), l.len, l.last());
-        if !dry_run {
-            bytes[lip::LEN_OFFSET..lip::LEN_OFFSET + 4].copy_from_slice(&l.last().to_be_bytes());
-            if let Err(e) = std::fs::write(path, &*bytes) {
-                eprintln!("{}: {e}", path.display());
-                ok = false;
-            }
+        let patch = repair::Patch {
+            at: lip::LEN_OFFSET,
+            bytes: l.last().to_be_bytes().to_vec(),
+        };
+        if !dry_run && let Err(e) = repair::write(path, &[patch]) {
+            eprintln!("{}: {e}", path.display());
+            ok = false;
         }
     }
     for p in l.validate(Some(&base_name(path))) {
@@ -690,7 +701,7 @@ fn rescale_lip(path: &Path, sound: &Path) -> Result<(), Failure> {
         i32::try_from(2 * audio.len()).map_err(|_| fail(1, format!("{}: too long for a lip file", sound.display())))?;
     let old = l.last();
     l.rescale(new_last);
-    std::fs::write(path, l.to_bytes()).map_err(|e| fail(1, format!("{}: {e}", path.display())))?;
+    replace_file(path, &l.to_bytes()).map_err(|e| fail(1, format!("{}: {e}", path.display())))?;
     println!("{}: last marker {old} -> {new_last}", path.display());
     for p in l.validate(Some(&base_name(path))) {
         println!("{}: kept: {}: {p}", path.display(), severity(&p));
