@@ -12,6 +12,7 @@ pub mod detect;
 pub mod g2p;
 pub mod input;
 pub mod lip;
+pub mod lipgen;
 pub mod msg;
 pub mod output;
 pub mod pcm;
