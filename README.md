@@ -14,7 +14,7 @@ Usage: `ipsdoc sound.wav sound.acm`
 | `ipsdoc info FILE...` | Shows the headers, how the file reads, and which header fields are wrong. |
 | `ipsdoc check PATH...` | Decodes every sound and checks every lip file (directories recursively); fails if any does not decode, or a lip file is broken or does not fit the ACM beside it. |
 | `ipsdoc repair [--dry-run] FILE...` | Fixes wrong ACM and WAVC header fields, and lip files' length fields, in place, without re-encoding. |
-| `ipsdoc lip SOUND... [--msg FILE]` | Writes a Fallout lip-sync file beside each speech sound, from its line in a dialog `.msg` (or a `.txt` beside it), or from the sound alone. |
+| `ipsdoc lip SOUND... [--msg FILE]` | Writes a Fallout lip-sync file beside each speech sound, from its line in a dialog `.msg` (or a `.txt` beside it), or from the sound alone; it names each lip file it replaces. |
 | `ipsdoc lip --rescale LIP --for SOUND` | Rescales a lip file to another sound (another rate or channel count of the same recording). |
 
 `convert` options: `--to acm|wavc|wav|ogg` (otherwise from the output's extension), `--rate R` (resample),

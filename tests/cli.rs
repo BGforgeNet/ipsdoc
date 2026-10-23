@@ -343,6 +343,10 @@ fn lip_writes_a_lip_and_an_empty_txt_beside_the_sound() {
     assert_eq!(lip.name(), "X");
     assert_eq!(std::fs::read(d.path("x.txt")).unwrap(), b"");
     ok(&ipsdoc(&["check", s(&d.path("x.lip"))]));
+    assert!(!ok(&out).contains("replaced"), "{}", all_output(&out));
+    // A second run replaces the lip file, and says so.
+    let again = ok(&ipsdoc(&["lip", s(&src)]));
+    assert!(again.contains(&format!("{}: replaced", s(&d.path("x.lip")))), "{again}");
 }
 
 #[test]
