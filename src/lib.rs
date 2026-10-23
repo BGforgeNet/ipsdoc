@@ -16,4 +16,5 @@ pub mod msg;
 pub mod output;
 pub mod pcm;
 pub mod repair;
+pub mod speech;
 pub mod wavc;
