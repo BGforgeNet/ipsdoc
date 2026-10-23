@@ -137,12 +137,14 @@ impl Problem {
     /// How much it matters.
     pub fn severity(&self) -> Severity {
         match self {
-            Problem::BadCodes { .. } | Problem::Backwards { .. } | Problem::CountMismatch { .. } => Severity::Error,
-            Problem::BadFirstMarker(_)
-            | Problem::FewMarkers(_)
-            | Problem::Flags(_)
-            | Problem::Len { .. }
-            | Problem::Name { .. } => Severity::Warning,
+            // The engine loads the sound the name field names, so another name plays another sound for the line.
+            Problem::BadCodes { .. }
+            | Problem::Backwards { .. }
+            | Problem::CountMismatch { .. }
+            | Problem::Name { .. } => Severity::Error,
+            Problem::BadFirstMarker(_) | Problem::FewMarkers(_) | Problem::Flags(_) | Problem::Len { .. } => {
+                Severity::Warning
+            }
         }
     }
 }
@@ -530,7 +532,8 @@ mod tests {
         );
         let severities: Vec<Severity> = problems.iter().map(Problem::severity).collect();
         use Severity::{Error, Warning};
-        assert_eq!(severities, vec![Error, Error, Warning, Warning, Warning, Warning]);
+        // A name other than the file's makes the game play another sound for the line.
+        assert_eq!(severities, vec![Error, Error, Warning, Warning, Warning, Error]);
     }
 
     #[test]

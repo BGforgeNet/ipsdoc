@@ -213,17 +213,21 @@ fn text_shapes(a: &speech::Analysis, phrases: &[Vec<Word>], p: &Params, out: &mu
             .collect();
         // The group's speech frames, its pauses left out.
         let frames: Vec<usize> = group.iter().flat_map(|&(s, e)| s as usize..e as usize).collect();
-        for (code, f) in phones.iter().zip(align(&phones, &frames, a, p)) {
-            out.push(Shape {
+        let placed: Vec<Shape> = phones
+            .iter()
+            .zip(align(&phones, &frames, a, p))
+            .map(|(code, f)| Shape {
                 start: frames[f] as f64,
                 code: code.0,
-            });
-        }
-        // Long pauses inside the group, and the group's end.
+            })
+            .collect();
+        out.extend_from_slice(&placed);
+        // Long pauses inside the group, and the group's end. After a pause the mouth resumes with this group's
+        // phoneme running at that point (never with a shape pushed for an earlier pause).
         for pair in group.windows(2) {
             let (gap_start, gap_end) = (pair[0].1, pair[1].0);
             if gap_end - gap_start > silence {
-                let resume = out.iter().rev().find(|s| s.start <= gap_end).map_or(0, |s| s.code);
+                let resume = placed.iter().rev().find(|s| s.start <= gap_end).map_or(0, |s| s.code);
                 out.push(Shape {
                     start: gap_start,
                     code: 0,
@@ -569,6 +573,36 @@ mod tests {
             (closed[1] - 0.45).abs() <= 0.05,
             "second P at {} s, the dip is 0.45 to 0.53 s",
             closed[1]
+        );
+    }
+
+    #[test]
+    fn after_each_long_pause_the_mouth_resumes_with_the_phoneme_placed_there() {
+        // One phrase over three bursts with long pauses between them.
+        let audio = sound(&[
+            (0.2, 0.0),
+            (0.4, 9000.0),
+            (0.4, 0.0),
+            (0.4, 9000.0),
+            (0.4, 0.0),
+            (0.4, 9000.0),
+            (0.2, 0.0),
+        ]);
+        let p = Params {
+            lead: 0.0,
+            ..Params::default()
+        };
+        let t = tokens("fee foo thaw mama lily oak");
+        let lip = generate("test", &audio, Some(&t), &p);
+        check_valid(&lip, &audio);
+        // The third burst (from 1.8 s) starts with a phoneme placed there, never the AW of "thaw" (code 7), which
+        // belongs before the second pause.
+        let pos = 2 * (1.83 * RATE as f32) as i32;
+        let i = lip.markers.iter().rposition(|m| m.position <= pos).unwrap_or(0);
+        let code = lip.phonemes[i];
+        assert!(
+            code != 0 && code != 7,
+            "code {code} at the third burst's start: {lip:?}"
         );
     }
 

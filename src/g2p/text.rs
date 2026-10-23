@@ -110,7 +110,12 @@ fn brackets(text: &str) -> String {
         let inner_start = i + 1;
         let (inner, after) = match rest[inner_start..].find(close) {
             Some(j) => (&rest[inner_start..inner_start + j], &rest[inner_start + j + 1..]),
-            None => (&rest[inner_start..], ""),
+            // Unclosed: a typo, not a direction; the bracket goes and its text stays.
+            None => {
+                out.push(' ');
+                rest = &rest[inner_start..];
+                continue;
+            }
         };
         let words: Vec<String> = inner
             .split(|c: char| !c.is_ascii_alphabetic())
@@ -356,6 +361,8 @@ mod tests {
         assert_eq!(words("*Cough* Yes"), "~ YES");
         assert_eq!(words("[He looks you up and down distastefully.] Well"), "WELL");
         assert_eq!(words("age. (chuckles)"), "AGE | ~");
+        // An unclosed bracket is a typo, not a direction: its text stays.
+        assert_eq!(words("Hello (there, friend"), "HELLO THERE | FRIEND");
     }
 
     #[test]

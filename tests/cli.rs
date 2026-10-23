@@ -436,6 +436,60 @@ fn check_reports_a_truncated_lip_named_or_found() {
 }
 
 #[test]
+fn check_fails_when_the_sound_does_not_decode_and_notes_a_missing_one() {
+    let d = Dir::new();
+    let src = d.path("x.acm");
+    put(&src, &speech(), OutputFormat::Acm);
+    ok(&ipsdoc(&["lip", s(&src)]));
+    let mut acm = std::fs::read(&src).unwrap();
+    acm.truncate(40);
+    std::fs::write(&src, acm).unwrap();
+    let out = ipsdoc(&["check", s(&d.path("x.lip"))]);
+    assert_eq!(out.status.code(), Some(1), "{}", all_output(&out));
+    assert!(all_output(&out).contains("x.acm"), "{}", all_output(&out));
+    std::fs::remove_file(&src).unwrap();
+    let out = ipsdoc(&["check", s(&d.path("x.lip"))]);
+    ok(&out);
+    assert!(all_output(&out).contains("no sound X"), "{}", all_output(&out));
+}
+
+#[test]
+fn check_fits_the_sound_the_name_field_names() {
+    let d = Dir::new();
+    let (a, b) = (d.path("a.acm"), d.path("b.acm"));
+    put(&a, &speech(), OutputFormat::Acm);
+    put(&b, &Audio::from_i16(22050, 1, vec![0; 30000]), OutputFormat::Acm);
+    ok(&ipsdoc(&["lip", s(&a)]));
+    // b.lip is a copy of a.lip: the game loads it for line b and plays a.acm, which it fits.
+    std::fs::copy(d.path("a.lip"), d.path("b.lip")).unwrap();
+    let out = ipsdoc(&["check", s(&d.path("b.lip"))]);
+    assert_eq!(out.status.code(), Some(1), "{}", all_output(&out));
+    let text = all_output(&out);
+    assert!(text.contains("error: names sound A, the file is b"), "{text}");
+    assert!(!text.contains("another recording"), "{text}");
+}
+
+#[test]
+fn rescale_reports_the_problems_it_keeps() {
+    let d = Dir::new();
+    let src = d.path("x.acm");
+    put(&src, &speech(), OutputFormat::Acm);
+    ok(&ipsdoc(&["lip", s(&src)]));
+    let lip = d.path("x.lip");
+    let mut l = lip_at(&lip);
+    let n = l.markers.len();
+    l.markers[n - 2].position = 2;
+    std::fs::write(&lip, l.to_bytes()).unwrap();
+    let out = ipsdoc(&["lip", "--rescale", s(&lip), "--for", s(&src)]);
+    ok(&out);
+    assert!(
+        all_output(&out).contains("is before the one preceding it"),
+        "{}",
+        all_output(&out)
+    );
+}
+
+#[test]
 fn repair_fixes_a_lip_length_field_only() {
     let d = Dir::new();
     let src = d.path("x.acm");

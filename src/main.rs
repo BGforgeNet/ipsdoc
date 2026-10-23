@@ -434,14 +434,24 @@ fn info_files(files: &[PathBuf]) -> Result<(), Failure> {
     }
 }
 
-/// The sound a lip file belongs to: the ACM of the same name beside it (`.acm` or `.ACM`), decoded.
-fn sound_beside(lip: &Path) -> Option<(PathBuf, ipsdoc::pcm::Audio)> {
-    ["acm", "ACM"].iter().find_map(|ext| {
-        let p = lip.with_extension(ext);
-        let bytes = std::fs::read(&p).ok()?;
-        let audio = input::read(&bytes, &ReadOptions::default()).ok()?.audio;
-        Some((p, audio))
-    })
+/// The sound the game plays with a lip file: the ACM its name field names, beside it (the name as stored or in
+/// lower case, `.acm` or `.ACM`), decoded. `Ok(None)` when there is none; an error when it does not decode.
+fn named_sound(lip: &Path, l: &Lip) -> Result<Option<(PathBuf, ipsdoc::pcm::Audio)>, String> {
+    let name = l.name();
+    if name.is_empty() {
+        return Ok(None);
+    }
+    let dir = lip.parent().unwrap_or(Path::new("."));
+    let found = [name.clone(), name.to_lowercase()]
+        .iter()
+        .flat_map(|n| ["acm", "ACM"].map(|ext| dir.join(format!("{n}.{ext}"))))
+        .find(|p| p.is_file());
+    let Some(p) = found else { return Ok(None) };
+    let bytes = std::fs::read(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+    let audio = input::read(&bytes, &ReadOptions::default())
+        .map_err(|e| format!("{}: {}", p.display(), chain(&e)))?
+        .audio;
+    Ok(Some((p, audio)))
 }
 
 fn base_name(path: &Path) -> String {
@@ -469,14 +479,18 @@ fn lip_info(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
         l.markers.len(),
         l.last()
     );
-    if let Some((acm, audio)) = sound_beside(path) {
-        let secs = audio.frames() as f64 / f64::from(audio.rate.max(1));
-        let fit = match lip::fit(l.last(), audio.len()) {
-            lip::Fit::Matches => "fits it".to_owned(),
-            lip::Fit::Scaled(f) => format!("is {f}x its length"),
-            lip::Fit::Other(r) => format!("is {r:.4} of its length"),
-        };
-        println!("  sound {}: {secs:.3} s; the lip file {fit}", acm.display());
+    match named_sound(path, &l) {
+        Ok(Some((acm, audio))) => {
+            let secs = audio.frames() as f64 / f64::from(audio.rate.max(1));
+            let fit = match lip::fit(l.last(), audio.len()) {
+                lip::Fit::Matches => "fits it".to_owned(),
+                lip::Fit::Scaled(f) => format!("is {f}x its length"),
+                lip::Fit::Other(r) => format!("is {r:.4} of its length"),
+            };
+            println!("  sound {}: {secs:.3} s; the lip file {fit}", acm.display());
+        }
+        Ok(None) => println!("  no sound {} beside it", l.name()),
+        Err(e) => println!("  sound unreadable: {e}"),
     }
     for p in l.validate(Some(&base_name(path))) {
         println!("  {}: {p}", severity(&p));
@@ -498,7 +512,23 @@ fn check_lip(path: &Path, bytes: &[u8]) -> bool {
         eprintln!("{}: {}: {p}", path.display(), severity(&p));
         ok &= p.severity() != lip::Severity::Error;
     }
-    if let Some((acm, audio)) = sound_beside(path) {
+    let sound = match named_sound(path, &l) {
+        Ok(Some(s)) => Some(s),
+        Ok(None) => {
+            eprintln!(
+                "{}: no sound {} beside it; its length is not checked",
+                path.display(),
+                l.name()
+            );
+            None
+        }
+        Err(e) => {
+            eprintln!("{}: its sound does not decode: {e}", path.display());
+            ok = false;
+            None
+        }
+    };
+    if let Some((acm, audio)) = sound {
         match lip::fit(l.last(), audio.len()) {
             lip::Fit::Matches => {}
             lip::Fit::Scaled(f) => {
@@ -615,6 +645,8 @@ fn lip_one(sound: &Path, a: &LipArgs, entries: Option<&[msg::Entry]>) -> Result<
     if tokens.is_none() {
         eprintln!("{}: no text for it; lip sync from the audio only", sound.display());
     }
+    // Positions are 32-bit: about 13 hours of mono speech.
+    i32::try_from(2 * audio.len()).map_err(|_| fail(1, format!("{}: too long for a lip file", sound.display())))?;
     let l = lipgen::generate(&name, &audio, tokens.as_deref(), &lipgen::Params::default());
     let out = a.output.clone().unwrap_or_else(|| sound.with_extension("lip"));
     std::fs::write(&out, l.to_bytes()).map_err(|e| fail(1, format!("{}: {e}", out.display())))?;
@@ -636,6 +668,9 @@ fn rescale_lip(path: &Path, sound: &Path) -> Result<(), Failure> {
     l.rescale(new_last);
     std::fs::write(path, l.to_bytes()).map_err(|e| fail(1, format!("{}: {e}", path.display())))?;
     println!("{}: last marker {old} -> {new_last}", path.display());
+    for p in l.validate(Some(&base_name(path))) {
+        println!("{}: kept: {}: {p}", path.display(), severity(&p));
+    }
     Ok(())
 }
 
