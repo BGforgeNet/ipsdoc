@@ -262,10 +262,10 @@ fn describe(n: &Note) -> String {
                     format!("content is interleaved mono, score {score:.2}")
                 }
                 input::ChannelEvidence::Stereo { score } => format!("content is stereo, score {score:.2}"),
-                input::ChannelEvidence::HeaderMono
-                | input::ChannelEvidence::Undecidable
-                | input::ChannelEvidence::NotChecked
-                | input::ChannelEvidence::WavcHeaders => format!("{evidence:?}"),
+                input::ChannelEvidence::HeaderMono => "no stereo claim, so mono".to_owned(),
+                input::ChannelEvidence::Undecidable => "content silent or constant".to_owned(),
+                input::ChannelEvidence::NotChecked => "more than two channels, not checked".to_owned(),
+                input::ChannelEvidence::WavcHeaders => "its WAVC and ACM headers agree".to_owned(),
             };
             format!("channels: header {header}, reads as {used} ({why})")
         }

@@ -208,6 +208,20 @@ fn info_reports_headers_and_findings() {
 }
 
 #[test]
+fn says_in_words_why_a_zero_channel_header_reads_as_mono() {
+    let d = Dir::new();
+    let src = d.path("zero.acm");
+    let mut acm = ipsdoc::acm::encode(&[1, 2, 3, 4], 1, 22050).unwrap();
+    acm[8..10].copy_from_slice(&0u16.to_le_bytes());
+    std::fs::write(&src, acm).unwrap();
+    let text = ok(&ipsdoc(&["info", s(&src)]));
+    assert!(
+        text.contains("header 0, reads as 1 (no stereo claim, so mono)"),
+        "{text}"
+    );
+}
+
+#[test]
 fn check_fails_on_a_broken_file_and_names_it() {
     let d = Dir::new();
     put(&d.path("good.acm"), &stereo(), OutputFormat::Acm);
