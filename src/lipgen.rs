@@ -2,8 +2,8 @@
 //!
 //! With text, the line's phrases are matched to the stretches of speech found in the sound, and each phrase's
 //! phonemes are aligned to its speech by loudness (vowels on the loud frames, consonants on the dips), each kept near
-//! its typical length. Without text, shapes come from the sound alone. Either way, neighbours showing the same head frame merge, shapes are held a minimum time,
-//! changes are capped per second, and pauses show the silent mouth.
+//! its typical length. Without text, shapes come from the sound alone. Either way, neighbours showing the same head
+//! frame merge, shapes are held a minimum time, changes are capped per second, and pauses show the silent mouth.
 
 use crate::g2p::{self, Token};
 use crate::lip::{Lip, Marker};
