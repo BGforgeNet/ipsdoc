@@ -11,7 +11,7 @@ work=$dir/snd2acm-bin
 mkdir -p "$work" "$dir/snd2acm"
 git show "$python_commit:ipsdoc_bin.py" >"$work/ipsdoc_bin.py"
 python -c 'import base64, sys; sys.path.insert(0, sys.argv[1]); import ipsdoc_bin; open(sys.argv[2], "wb").write(base64.b64decode(ipsdoc_bin.snd2acm_base64))' "$work" "$work/snd2acm.exe"
-cargo run -q --release -p oracles --bin fixtures -- "$dir/fixtures"
+cargo run -q --release --locked -p oracles --bin fixtures -- "$dir/fixtures"
 for wav in "$dir"/fixtures/*.wav; do
     name=$(basename "$wav" .wav)
     "$work/snd2acm.exe" "$wav" "$dir/snd2acm/$name.acm" -q0

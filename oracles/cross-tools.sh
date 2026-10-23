@@ -7,12 +7,12 @@ set -eu
 
 dir=${1:?usage: cross-tools.sh <dir> [acmconverter command...]}
 shift
-cargo run -q --release -p oracles --bin fixtures -- "$dir/fixtures"
+cargo run -q --release --locked -p oracles --bin fixtures -- "$dir/fixtures"
 mkdir -p "$dir/ours"
 for wav in "$dir"/fixtures/*.wav; do
     name=$(basename "$wav" .wav)
     # Through cargo, so the binary is found wherever the target directory is.
-    cargo run -q --release -p ipsdoc -- convert "$wav" "$dir/ours/$name.acm"
+    cargo run -q --release --locked -p ipsdoc -- convert "$wav" "$dir/ours/$name.acm"
 done
 if [ $# -gt 0 ]; then
     mkdir -p "$dir/acmtools" "$dir/acmtools-decoded"
