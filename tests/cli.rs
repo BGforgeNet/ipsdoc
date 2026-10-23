@@ -278,6 +278,20 @@ fn check_goes_on_past_an_unreadable_directory() {
     assert!(text.contains("locked"), "{text}");
 }
 
+#[cfg(unix)]
+#[test]
+fn check_walks_a_tree_once_through_links_back_into_it() {
+    let d = Dir::new();
+    let sub = d.path("sub");
+    std::fs::create_dir(&sub).unwrap();
+    put(&sub.join("good.acm"), &stereo(), OutputFormat::Acm);
+    // A loop, and a second link to the same tree.
+    std::os::unix::fs::symlink("..", sub.join("up")).unwrap();
+    std::os::unix::fs::symlink("sub", d.path("again")).unwrap();
+    let text = ok(&ipsdoc(&["check", s(&d.0)]));
+    assert!(text.contains("1 sounds checked"), "{text}");
+}
+
 #[test]
 fn a_missing_input_is_an_error() {
     let d = Dir::new();

@@ -1,5 +1,6 @@
 //! `ipsdoc`: converts, inspects, checks and repairs Interplay ACM, WAVC and other game sound files.
 
+use std::collections::HashSet;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -339,11 +340,24 @@ fn info(path: &Path) -> Result<(), Failure> {
     Ok(())
 }
 
-/// Every file under `path` (or `path` itself), sorted; a directory that cannot be listed goes to `errors`.
-fn files_under(path: &Path, out: &mut Vec<PathBuf>, errors: &mut Vec<String>) {
+/// Every file under `path` (or `path` itself), sorted; a directory that cannot be listed goes to `errors`. Symlinks
+/// are followed, but a directory already in `walked` (reached again through a link: a loop, or a second link to the
+/// same tree) is not walked again, so its files are checked once.
+fn files_under(path: &Path, walked: &mut HashSet<PathBuf>, out: &mut Vec<PathBuf>, errors: &mut Vec<String>) {
     if !path.is_dir() {
         out.push(path.to_path_buf());
         return;
+    }
+    match std::fs::canonicalize(path) {
+        Ok(real) => {
+            if !walked.insert(real) {
+                return;
+            }
+        }
+        Err(e) => {
+            errors.push(format!("{}: {e}", path.display()));
+            return;
+        }
     }
     let mut entries = Vec::new();
     match std::fs::read_dir(path) {
@@ -359,7 +373,7 @@ fn files_under(path: &Path, out: &mut Vec<PathBuf>, errors: &mut Vec<String>) {
     }
     entries.sort();
     for e in entries {
-        files_under(&e, out, errors);
+        files_under(&e, walked, out, errors);
     }
 }
 
@@ -368,7 +382,7 @@ fn check(paths: &[PathBuf]) -> Result<(), Failure> {
     for p in paths {
         let explicit = !p.is_dir();
         let (mut files, mut errors) = (Vec::new(), Vec::new());
-        files_under(p, &mut files, &mut errors);
+        files_under(p, &mut HashSet::new(), &mut files, &mut errors);
         for e in &errors {
             eprintln!("{e}");
         }
