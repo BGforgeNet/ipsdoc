@@ -62,15 +62,6 @@ pub struct Analysis {
     pub segments: Vec<Segment>,
     /// Frames, inside speech, where the loudness dips.
     pub dips: Vec<usize>,
-    rate: u32,
-    channels: u16,
-}
-
-impl Analysis {
-    /// The index, into the sound's interleaved samples, where frame `f` starts.
-    pub fn sample_index(&self, f: usize) -> usize {
-        frame_start(f, self.rate) * usize::from(self.channels.max(1))
-    }
 }
 
 /// The audio frame where 10 ms frame `f` starts: `round(f * rate / 100)`, exact over any length (220.5 audio frames
@@ -129,13 +120,7 @@ pub fn analyse(audio: &Audio, p: &SpeechParams) -> Analysis {
     }
     let segments = segments(&raw, p);
     let dips = dips(&frames, &segments, p);
-    Analysis {
-        frames,
-        segments,
-        dips,
-        rate,
-        channels: audio.channels.max(1),
-    }
+    Analysis { frames, segments, dips }
 }
 
 fn percentile(values: &[f32], q: f32) -> f32 {
@@ -304,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn stereo_reads_as_its_mix_and_indexes_interleaved_samples() {
+    fn stereo_reads_as_its_mix() {
         let m = signal(&BURSTS, 0.0);
         let st: Vec<i16> = m.iter().flat_map(|&s| [s, s]).collect();
         let (am, ast) = (
@@ -312,10 +297,7 @@ mod tests {
             analyse(&Audio::from_i16(RATE, 2, st), &SpeechParams::default()),
         );
         assert_eq!(am.segments, ast.segments);
-        // 10 ms at 22050 Hz is 220.5 frames: frame 2 starts at frame 441, sample 882 in stereo.
-        assert_eq!(am.sample_index(2), 441);
-        assert_eq!(ast.sample_index(2), 882);
-        assert_eq!(am.sample_index(1000), 220_500);
+        assert_eq!(am.dips, ast.dips);
     }
 
     #[test]

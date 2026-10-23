@@ -15,7 +15,7 @@ pub enum Piece {
 }
 
 /// Words that, alone in brackets or asterisks, are noises the actor makes rather than a direction.
-pub const NOISES: &[&str] = &[
+const NOISES: &[&str] = &[
     "AH",
     "AHEM",
     "CHUCKLE",
@@ -252,7 +252,7 @@ const TENS: [&str; 10] = [
 /// A whole number in words, as said in dialog: years and the like (1100 to 2999, not on a hundred, and not 2001 to
 /// 2009) in pairs ("twenty two forty one"), round hundreds of them as hundreds ("fifteen hundred"), the rest as a
 /// cardinal ("three hundred fifty").
-pub fn number_words(n: u64) -> Vec<&'static str> {
+fn number_words(n: u64) -> Vec<&'static str> {
     let mut out = Vec::new();
     if (1100..=2999).contains(&n) && !n.is_multiple_of(100) && !(2001..=2009).contains(&n) {
         below_hundred(n / 100, &mut out);

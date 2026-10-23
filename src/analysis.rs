@@ -10,7 +10,7 @@
 pub const MONO_SCORE_LIMIT: f64 = 1.6;
 
 /// The two cross steps of interleaved mono agree to within this ratio.
-pub const CROSS_STEP_AGREEMENT: f64 = 0.9;
+const CROSS_STEP_AGREEMENT: f64 = 0.9;
 
 /// Mean absolute steps of a stream read as stereo frames `(L, R)`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -153,7 +153,7 @@ impl ChannelEvidence {
 }
 
 /// Sample rates the games and their mods use.
-pub const STANDARD_RATES: [u16; 8] = [8000, 11025, 16000, 22050, 24000, 32000, 44100, 48000];
+const STANDARD_RATES: [u16; 8] = [8000, 11025, 16000, 22050, 24000, 32000, 44100, 48000];
 
 /// The standard rate `rate` is a byte swap of, if it is not standard itself (the 1pp mod's 17580 is 44100 written
 /// big-endian).
