@@ -647,10 +647,16 @@ fn lip_one(sound: &Path, a: &LipArgs, entries: Option<&[msg::Entry]>) -> Result<
             }
             Some(found.entry.text.clone())
         }
-        _ => std::fs::read(sound.with_extension("txt"))
-            .ok()
+        _ => {
+            let txt = sound.with_extension("txt");
+            match std::fs::read(&txt) {
+                Ok(b) => Some(b),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => return Err(fail(1, format!("{}: {e}", txt.display()))),
+            }
             .filter(|b| !b.iter().all(u8::is_ascii_whitespace))
-            .map(|b| msg::decode(&b)),
+            .map(|b| msg::decode(&b))
+        }
     };
     let bytes = read_file(sound)?;
     let audio = input::read(&bytes, &ReadOptions::default())

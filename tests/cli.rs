@@ -399,6 +399,19 @@ fn lip_uses_a_transcript_beside_the_sound() {
 }
 
 #[test]
+fn lip_fails_on_a_transcript_it_cannot_read() {
+    let d = Dir::new();
+    let src = d.path("x.acm");
+    put(&src, &speech(), OutputFormat::Acm);
+    // A directory where the transcript would be: there, but unreadable as one.
+    std::fs::create_dir(d.path("x.txt")).unwrap();
+    let out = ipsdoc(&["lip", s(&src)]);
+    assert_eq!(out.status.code(), Some(1), "{}", all_output(&out));
+    assert!(all_output(&out).contains("x.txt"), "{}", all_output(&out));
+    assert!(!d.path("x.lip").exists());
+}
+
+#[test]
 fn lip_warns_on_a_rate_the_games_do_not_play_and_wants_one_input_for_an_output() {
     let d = Dir::new();
     let src = d.path("x.wav");
