@@ -9,6 +9,7 @@
 pub mod acm;
 pub mod analysis;
 pub mod detect;
+pub mod g2p;
 pub mod input;
 pub mod lip;
 pub mod msg;

@@ -314,6 +314,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "hound",
+ "miniz_oxide",
  "rubato",
  "symphonia",
  "thiserror",
