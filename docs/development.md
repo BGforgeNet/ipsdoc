@@ -1,7 +1,7 @@
 # Development
 
 The gate is the set of commands in `.github/workflows/build.yml` (jobs `lint`, `test`, `oracles`); run them locally
-before a commit.
+before a commit. The `lint` job pins the versions of the tools it installs; `actionlint` runs through `go run`.
 
 ## Reference decoders
 
