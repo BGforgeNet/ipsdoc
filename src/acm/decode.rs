@@ -71,8 +71,15 @@ pub enum DecodeError {
         /// The code.
         code: u32,
     },
+    /// A block larger than [`MAX_BLOCK_LEN`]: checked before decoding, as the block buffer is sized from the header
+    /// alone (the input may end inside the block, which then reads as zeros).
+    #[error("blocks of {len} samples; at most {max} are read", max = MAX_BLOCK_LEN)]
+    BlockTooLarge {
+        /// Samples per block, as the header states.
+        len: usize,
+    },
     /// The header's sample count needs more blocks than the input could hold, each block taking at least 20 bits
-    /// plus 5 per column: checked before decoding, so a corrupt header cannot drive a huge allocation.
+    /// plus 5 per column: checked before decoding, so a corrupt header cannot drive a huge sample buffer.
     #[error("the header needs {blocks} blocks; the input holds at most {fit}")]
     TooManyBlocks {
         /// Blocks the header needs.
@@ -100,6 +107,11 @@ pub enum Overflow {
     Wrap,
 }
 
+/// The largest block decoded, in samples. The games' and mods' ACMs (some 30 thousand streams) use at most 4096
+/// (levels 8, rows 16) and the lossless encoder 256; 16 times the largest bounds a hostile header's block buffer at
+/// 256 KiB.
+pub const MAX_BLOCK_LEN: usize = 1 << 16;
+
 /// Decodes a bare ACM stream (header first), clamping overflowing samples.
 ///
 /// # Errors
@@ -122,6 +134,9 @@ pub fn decode_with(acm: &[u8], overflow: Overflow) -> Result<Decoded, DecodeErro
     let mut stats = Stats::default();
     let (levels, cols, rows) = (u32::from(header.levels), header.cols(), usize::from(header.rows));
     let block_len = header.block_len();
+    if block_len > MAX_BLOCK_LEN {
+        return Err(DecodeError::BlockTooLarge { len: block_len });
+    }
     let total = header.samples as usize;
     let blocks = total.div_ceil(block_len) as u64;
     let fit = total_bits.div_ceil(20 + 5 * cols as u64);
@@ -746,23 +761,45 @@ mod tests {
         assert_eq!(d.stats.overflowed, 1);
     }
 
-    #[test]
-    fn rejects_a_header_the_input_cannot_hold_before_allocating() {
-        // Four bytes of data under a header claiming 2^32 - 1 samples in blocks of 32768 x 4095.
+    fn header_over(levels: u8, rows: u16, samples: u32, body: usize) -> Vec<u8> {
         let mut acm = Header {
-            samples: u32::MAX,
+            samples,
             channels: 2,
             rate: 22050,
-            levels: 15,
-            rows: 4095,
+            levels,
+            rows,
         }
         .to_bytes()
         .to_vec();
-        acm.extend_from_slice(&[0; 4]);
+        acm.resize(Header::LEN + body, 0);
+        acm
+    }
+
+    #[test]
+    fn rejects_a_header_the_input_cannot_hold_before_allocating() {
+        // Four bytes of data under a header claiming 2^32 - 1 samples in blocks of 256 x 16.
         assert_eq!(
-            decode(&acm).unwrap_err(),
-            DecodeError::TooManyBlocks { blocks: 33, fit: 1 }
+            decode(&header_over(8, 16, u32::MAX, 4)).unwrap_err(),
+            DecodeError::TooManyBlocks {
+                blocks: 1_048_576,
+                fit: 1
+            }
         );
+    }
+
+    #[test]
+    fn rejects_a_block_beyond_the_largest_before_allocating() {
+        // One byte of data under a single block of 32768 x 4095: a 512 MiB buffer if allocated.
+        assert_eq!(
+            decode(&header_over(15, 4095, 1, 1)).unwrap_err(),
+            DecodeError::BlockTooLarge { len: 134_184_960 }
+        );
+        assert_eq!(
+            decode(&header_over(12, 17, 1, 1)).unwrap_err(),
+            DecodeError::BlockTooLarge { len: 69_632 }
+        );
+        // The largest block allowed decodes; the input ends inside it and the rest reads as zeros.
+        assert_eq!(decode(&header_over(12, 16, 1, 1)).unwrap().samples, [0]);
     }
 
     #[test]
