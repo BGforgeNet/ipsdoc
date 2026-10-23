@@ -1,8 +1,8 @@
 //! Lip-sync generation: a sound, and optionally its line's phonemes, to a lip file.
 //!
-//! With text, the line's phrases are matched to the stretches of speech found in the sound, words get time by the
-//! typical length of their phonemes, and word boundaries move to nearby dips in loudness. Without text, shapes come
-//! from the sound alone. Either way, neighbours showing the same head frame merge, shapes are held a minimum time,
+//! With text, the line's phrases are matched to the stretches of speech found in the sound, and each phrase's
+//! phonemes are aligned to its speech by loudness (vowels on the loud frames, consonants on the dips), each kept near
+//! its typical length. Without text, shapes come from the sound alone. Either way, neighbours showing the same head frame merge, shapes are held a minimum time,
 //! changes are capped per second, and pauses show the silent mouth.
 
 use crate::g2p::{self, Token};
@@ -21,8 +21,9 @@ pub const HEAD_FRAME: [u8; 42] = [
 pub struct Params {
     /// Speech detection.
     pub speech: SpeechParams,
-    /// A word boundary moves to a dip this close.
-    pub snap: f32,
+    /// In aligning text to the sound, how much a phoneme's length straying from its typical share costs against its
+    /// loudness misfit.
+    pub duration_weight: f32,
     /// The shortest a shape is held ...
     pub hold: f32,
     /// ... except closed lips (m, p, b), held at least this long.
@@ -39,12 +40,12 @@ impl Default for Params {
     fn default() -> Params {
         Params {
             speech: SpeechParams::default(),
-            snap: 0.04,
-            hold: 0.07,
+            duration_weight: 3.0,
+            hold: 0.05,
             closed_hold: 0.04,
             max_rate: 8.0,
             silence: 0.25,
-            lead: 0.06,
+            lead: 0.03,
         }
     }
 }
@@ -136,6 +137,8 @@ const CODE_MS: [u16; 42] = [
     100, 112, 105, 124, 115, 113, 116, 111, 141, 143, 106, 111, 111, 96, 136, 138, 158, 102, 99, 91, 93, 99, 95, 108,
     106, 113, 97, 111, 104, 117, 103, 95, 105, 97, 98, 101, 104, 88, 91, 110, 103, 123,
 ];
+/// Without text, a dip this deep (dB) under both sides within 50 ms is taken as a syllable boundary.
+const SYLLABLE_DIP: f32 = 2.0;
 /// A vocal noise (a cough, a laugh) takes about two shapes' time.
 const NOISE_MS: f64 = 220.0;
 
@@ -176,8 +179,8 @@ fn partition(sizes: &[f64], targets: &[f64]) -> Vec<usize> {
     ends
 }
 
-/// Phrases laid over speech: phrases matched to stretches of speech, words to time by weight, word starts moved to
-/// dips; silent mouth between matched groups and over long pauses inside one.
+/// Phrases laid over speech: phrases matched to stretches of speech, phonemes aligned to each group's speech frames;
+/// silent mouth between matched groups and over long pauses inside one.
 fn text_shapes(a: &speech::Analysis, phrases: &[Vec<Word>], p: &Params, out: &mut Vec<Shape>) {
     let segs: Vec<(f64, f64)> = a.segments.iter().map(|s| (s.start as f64, s.end as f64)).collect();
     if segs.is_empty() {
@@ -201,49 +204,20 @@ fn text_shapes(a: &speech::Analysis, phrases: &[Vec<Word>], p: &Params, out: &mu
         }
     }
     let silence = f64::from(p.silence) * f64::from(speech::FRAMES_PER_SECOND);
-    let snap = f64::from(p.snap) * f64::from(speech::FRAMES_PER_SECOND);
     for (prange, srange) in pairs {
         let group = &segs[srange];
-        let words: Vec<&Word> = phrases[prange].iter().flatten().collect();
-        let total_w: f64 = words.iter().map(|w| w.weight()).sum::<f64>().max(1e-9);
-        let speech_len: f64 = group.iter().map(|&(s, e)| e - s).sum();
-        // Time at a share of the group's speech, skipping its pauses.
-        let at = |share: f64| -> f64 {
-            let mut left = share.clamp(0.0, 1.0) * speech_len;
-            for &(s, e) in group {
-                if left <= e - s {
-                    return s + left;
-                }
-                left -= e - s;
-            }
-            group.last().map_or(0.0, |&(_, e)| e)
-        };
-        let mut bounds = Vec::with_capacity(words.len() + 1);
-        let mut cum = 0.0;
-        bounds.push(at(0.0));
-        for w in &words {
-            cum += w.weight();
-            bounds.push(at(cum / total_w));
-        }
-        let last = bounds.len() - 1;
-        for b in &mut bounds[1..last] {
-            if let Some(&d) = a
-                .dips
-                .iter()
-                .filter(|&&d| (d as f64 - *b).abs() <= snap)
-                .min_by(|&&x, &&y| (x as f64 - *b).abs().total_cmp(&(y as f64 - *b).abs()))
-            {
-                *b = d as f64;
-            }
-        }
-        for (i, w) in words.iter().enumerate() {
-            let (start, end) = (bounds[i], bounds[i + 1].max(bounds[i]));
-            let ww = w.weight().max(1e-9);
-            let mut t = start;
-            for &(code, weight) in &w.0 {
-                out.push(Shape { start: t, code });
-                t += (end - start) * weight / ww;
-            }
+        let phones: Vec<(u8, f64)> = phrases[prange]
+            .iter()
+            .flatten()
+            .flat_map(|w| w.0.iter().copied())
+            .collect();
+        // The group's speech frames, its pauses left out.
+        let frames: Vec<usize> = group.iter().flat_map(|&(s, e)| s as usize..e as usize).collect();
+        for (code, f) in phones.iter().zip(align(&phones, &frames, a, p)) {
+            out.push(Shape {
+                start: frames[f] as f64,
+                code: code.0,
+            });
         }
         // Long pauses inside the group, and the group's end.
         for pair in group.windows(2) {
@@ -266,26 +240,138 @@ fn text_shapes(a: &speech::Analysis, phrases: &[Vec<Word>], p: &Params, out: &mu
     }
 }
 
+/// How loud a phoneme is expected to be, 0 to 1: vowels (and noises) loudest, nasals and liquids between, stops and
+/// fricatives quietest.
+fn loudness_target(code: u8) -> f32 {
+    match code {
+        1..=16 => 1.0,
+        32..=38 => 0.6,
+        _ => 0.35,
+    }
+}
+
+/// Where each phoneme starts, as an index into `frames` (a phrase group's speech frames): the split of the frames into
+/// one run per phoneme that best fits each frame's loudness to its phoneme's, with each run's length kept near its
+/// phoneme's typical share. Falls back to the shares alone when there are more phonemes than frames.
+fn align(phones: &[(u8, f64)], frames: &[usize], a: &speech::Analysis, p: &Params) -> Vec<usize> {
+    let (n, m) = (phones.len(), frames.len());
+    let total_ms: f64 = phones.iter().map(|&(_, ms)| ms).sum::<f64>().max(1e-9);
+    let expected: Vec<f64> = phones.iter().map(|&(_, ms)| ms / total_ms * m as f64).collect();
+    if n == 0 || n > m {
+        let mut cum = 0.0;
+        return expected
+            .iter()
+            .map(|e| {
+                let at = cum;
+                cum += e;
+                (at.floor() as usize).min(m.saturating_sub(1))
+            })
+            .collect();
+    }
+    // Loudness 0 to 1 against the loudest frame within 150 ms.
+    const REACH: usize = 15;
+    let db: Vec<f32> = frames.iter().map(|&f| a.frames[f].db).collect();
+    let level: Vec<f32> = (0..m)
+        .map(|i| {
+            let peak = db[i.saturating_sub(REACH)..(i + REACH + 1).min(m)]
+                .iter()
+                .copied()
+                .fold(f32::MIN, f32::max);
+            ((db[i] - (peak - LOUDNESS_RANGE)) / LOUDNESS_RANGE).clamp(0.0, 1.0)
+        })
+        .collect();
+    // fit[i][j]: the summed loudness misfit of phoneme i over frames 0..j.
+    let fit: Vec<Vec<f64>> = phones
+        .iter()
+        .map(|&(code, _)| {
+            let t = loudness_target(code);
+            let mut sums = vec![0.0; m + 1];
+            for j in 0..m {
+                sums[j + 1] = sums[j] + f64::from((level[j] - t).powi(2));
+            }
+            sums
+        })
+        .collect();
+    let weight = f64::from(p.duration_weight);
+    // cost[i][j]: the best for phonemes 0..i over frames 0..j; from[i][j] where phoneme i-1 starts.
+    let mut cost = vec![vec![f64::INFINITY; m + 1]; n + 1];
+    let mut from = vec![vec![0usize; m + 1]; n + 1];
+    cost[0][0] = 0.0;
+    for i in 1..=n {
+        let e = expected[i - 1].max(1.0);
+        let longest = ((3.0 * e).ceil() as usize).max(3);
+        for j in i..=m - (n - i) {
+            for start in j.saturating_sub(longest).max(i - 1)..j {
+                let prev = cost[i - 1][start];
+                if !prev.is_finite() {
+                    continue;
+                }
+                let len = (j - start) as f64;
+                let c = prev + fit[i - 1][j] - fit[i - 1][start] + weight * ((len - e) / e).powi(2);
+                if c < cost[i][j] {
+                    cost[i][j] = c;
+                    from[i][j] = start;
+                }
+            }
+        }
+    }
+    let mut starts = vec![0; n];
+    let mut j = m;
+    for i in (1..=n).rev() {
+        starts[i - 1] = from[i][j];
+        j = from[i][j];
+    }
+    starts
+}
+
+/// The span (dB) under the local peak that the alignment's loudness scale covers.
+const LOUDNESS_RANGE: f32 = 25.0;
+
 /// Shapes from the sound alone, frame by frame inside speech: closed lips at dips, a hiss shape for noisy frames,
 /// and openness by loudness under the stretch's peak.
 fn audio_shapes(a: &speech::Analysis, out: &mut Vec<Shape>) {
+    const REACH: usize = 15;
+    let side = |r: std::ops::Range<usize>| a.frames[r].iter().map(|x| x.db).fold(f32::MIN, f32::max);
     for s in &a.segments {
-        let peak = a.frames[s.start..s.end].iter().map(|f| f.db).fold(f32::MIN, f32::max);
-        for f in s.start..s.end {
-            let fr = a.frames[f];
+        let mut codes: Vec<u8> = (s.start..s.end)
+            .map(|f| {
+                let fr = a.frames[f];
+                // Openness against the loudest frame within 150 ms, so each syllable opens and closes.
+                let peak = side(f.saturating_sub(REACH).max(s.start)..(f + REACH + 1).min(s.end));
+                if fr.zcr > 0.15 && fr.low < 0.5 {
+                    27
+                } else if fr.db > peak - 6.0 {
+                    6
+                } else if fr.db > peak - 14.0 {
+                    4
+                } else {
+                    13
+                }
+            })
+            .collect();
+        // A consonant spans each syllable boundary: closed lips at a deep dip, a tongue consonant at a shallower one
+        // (SYLLABLE_DIP under both sides within 50 ms), over 30 ms either side.
+        for f in s.start + 1..s.end.saturating_sub(1) {
+            let d = a.frames[f].db;
             let code = if a.dips.contains(&f) {
                 32
-            } else if fr.zcr > 0.15 && fr.low < 0.5 {
-                27
-            } else if fr.db > peak - 6.0 {
-                6
-            } else if fr.db > peak - 14.0 {
-                4
+            } else if side(f.saturating_sub(5).max(s.start)..f) - d >= SYLLABLE_DIP
+                && side(f + 1..(f + 6).min(s.end)) - d >= SYLLABLE_DIP
+            {
+                19
             } else {
-                13
+                continue;
             };
+            for c in &mut codes[f.saturating_sub(3).max(s.start) - s.start..(f + 4).min(s.end) - s.start] {
+                *c = code;
+            }
+        }
+        for (i, &code) in codes.iter().enumerate() {
             if out.last().is_none_or(|l| l.code != code) {
-                out.push(Shape { start: f as f64, code });
+                out.push(Shape {
+                    start: (s.start + i) as f64,
+                    code,
+                });
             }
         }
         out.push(Shape {
@@ -455,12 +541,35 @@ mod tests {
         let s = shapes(&lip);
         let inner = &s[1..s.len() - 1];
         assert!(inner.iter().any(|&(f, _)| f == 6), "m, p or b closes the lips: {s:?}");
+        let p = Params::default();
         for &(f, len) in inner {
-            let least = if f == 6 { 0.04 } else { 0.07 };
+            let least = if f == 6 { p.closed_hold } else { p.hold };
             assert!(len >= least - 0.011, "{f} held {len}: {s:?}");
         }
         assert_eq!(frame_at(&lip, 0.1), 0);
         assert_eq!(frame_at(&lip, 1.1), 0);
+    }
+
+    #[test]
+    fn consonants_follow_the_loudness_dips() {
+        // "pa pa" over loud-quiet-loud with the quiet part early: the second P belongs in the dip, not halfway.
+        let audio = sound(&[(0.2, 0.0), (0.25, 9000.0), (0.08, 700.0), (0.6, 9000.0), (0.2, 0.0)]);
+        let lip = generate("test", &audio, Some(&tokens("pa pa")), &Params::default());
+        check_valid(&lip, &audio);
+        let lead = f64::from(Params::default().lead);
+        let closed: Vec<f64> = lip
+            .phonemes
+            .iter()
+            .zip(&lip.markers)
+            .filter(|&(&c, _)| HEAD_FRAME[usize::from(c)] == 6)
+            .map(|(_, m)| f64::from(m.position) / 2.0 / f64::from(RATE) + lead)
+            .collect();
+        assert_eq!(closed.len(), 2, "{lip:?}");
+        assert!(
+            (closed[1] - 0.45).abs() <= 0.05,
+            "second P at {} s, the dip is 0.45 to 0.53 s",
+            closed[1]
+        );
     }
 
     #[test]
