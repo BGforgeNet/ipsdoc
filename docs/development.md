@@ -65,5 +65,6 @@ Fallout 2's own lip files, and asserts on half the speakers, the half `lipgen::P
 IPSDOC_LIPS=... IPSDOC_MSG=... IPSDOC_LIPS_WAV2LIP=... cargo test --release -p oracles --test lips -- --ignored --nocapture
 ```
 
-`IPSDOC_LIPS_LIMIT=N` scores the first N lines of each half. The table it prints is the one to tune `Params` by,
-on the tuning half only.
+`IPSDOC_LIPS_LIMIT=N` takes the first N lip files of each half, before the ones without a usable reference are
+skipped; the run passes only with 100 held-out lines scored. The table it prints is the one to tune `Params` by, on
+the tuning half only.

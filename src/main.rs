@@ -37,7 +37,8 @@ enum Command {
         #[arg(required = true)]
         files: Vec<PathBuf>,
     },
-    /// Decodes sounds (directories: every sound inside, recursively) and fails on any that does not decode.
+    /// Decodes sounds and checks lip files (directories: every ACM, WAVC, RIFF, Ogg and lip file inside,
+    /// recursively); fails on any that does not decode or check.
     Check {
         /// Files or directories.
         #[arg(required = true)]

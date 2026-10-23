@@ -5,6 +5,14 @@
     clippy::missing_panics_doc
 )]
 //! Interplay ACM, WAVC and game sound file handling.
+//!
+//! Sounds: [`detect`] names a file's container by its first bytes; [`input`] reads it into [`pcm::Audio`], ACM and
+//! WAVC through [`acm`] and [`wavc`] with [`analysis`] weighing their headers against the content; [`output`]
+//! writes audio in any container; [`repair`] corrects headers in place from what reading established.
+//!
+//! Lip sync: [`msg`] finds a voiced line's text, [`g2p`] turns it into phonemes, [`speech`] finds where the sound
+//! speaks, and [`lipgen`] aligns the two (or works from the sound alone) into a [`lip::Lip`], the file format [`lip`]
+//! reads, writes and checks.
 
 pub mod acm;
 pub mod analysis;

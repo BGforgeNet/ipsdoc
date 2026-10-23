@@ -12,7 +12,7 @@ Usage: `ipsdoc sound.wav sound.acm`
 |---|---|
 | `ipsdoc IN [OUT]`, `ipsdoc convert IN [OUT]` | Converts. Without `OUT`: an ACM or WAVC becomes a `.wav`, anything else an `.acm`, beside the input (a WAVC already named `.wav` needs an `OUT`). |
 | `ipsdoc info FILE...` | Shows the headers, how the file reads, and which header fields are wrong. |
-| `ipsdoc check PATH...` | Decodes every sound and checks every lip file (directories recursively); fails if any does not decode, or a lip file is broken or does not fit the ACM beside it. |
+| `ipsdoc check PATH...` | Decodes each file named and, in directories (recursively), every ACM, WAVC, RIFF and Ogg file, and checks the lip files among them; fails if any does not decode, or a lip file is broken or does not fit the ACM beside it. |
 | `ipsdoc repair [--dry-run] FILE...` | Fixes wrong ACM and WAVC header fields, and lip files' length fields, in place, without re-encoding. |
 | `ipsdoc lip SOUND... [--msg FILE]` | Writes a Fallout lip-sync file beside each speech sound, from its line in a dialog `.msg` (or a `.txt` beside it), or from the sound alone; it names each lip file it replaces. |
 | `ipsdoc lip --rescale LIP --for SOUND` | Rescales a lip file to another sound (another rate or channel count of the same recording). |
@@ -63,7 +63,8 @@ Formats are recognised by content, not by name: an Infinity Engine `.wav` may ho
   letter-to-sound rules for words it lacks, and are aligned to the speech by loudness. The dialog `.msg` names each
   line's sound: `ipsdoc lip --msg dialog/vccasidy.msg cas0103.acm`. Without text, mouth shapes come from the sound.
 - **Checks.** A lip file names the sound the game loads for it, and its length must fit that sound; `check` reports
-  either mismatch, phoneme codes the original game misreads (42 and up), and markers out of order.
+  either mismatch, phoneme codes the original game misreads (42 and up), and markers out of order. `check`, `info`
+  and `repair` know a lip file by content: version 2 and the `VOC` extension field every original file has.
 
 ### Building
 
