@@ -457,7 +457,14 @@ fn repair_files(files: &[PathBuf], dry_run: bool) -> Result<(), Failure> {
             println!("{}: nothing to repair", f.display());
         }
         for x in &r.fixes {
-            println!("{}: {} {} -> {}", f.display(), field_name(x.field), x.stored, x.correct);
+            let dry = if dry_run { " (dry run)" } else { "" };
+            println!(
+                "{}: {} {} -> {}{dry}",
+                f.display(),
+                field_name(x.field),
+                x.stored,
+                x.correct
+            );
         }
         if !dry_run
             && !r.patches.is_empty()

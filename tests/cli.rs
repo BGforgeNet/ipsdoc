@@ -244,9 +244,11 @@ fn repair_fixes_headers_in_place_and_dry_run_does_not() {
     let src = d.path("speech.acm");
     let original = ipsdoc::acm::encode(&[1, 2, 3], 2, 17580).unwrap();
     std::fs::write(&src, &original).unwrap();
-    ok(&ipsdoc(&["repair", "--dry-run", s(&src)]));
+    let dry = ok(&ipsdoc(&["repair", "--dry-run", s(&src)]));
+    assert!(dry.contains("ACM rate 17580 -> 44100 (dry run)"), "{dry}");
     assert_eq!(std::fs::read(&src).unwrap(), original);
-    ok(&ipsdoc(&["repair", s(&src)]));
+    let real = ok(&ipsdoc(&["repair", s(&src)]));
+    assert!(real.contains("ACM rate 17580 -> 44100\n"), "{real}");
     let h = ipsdoc::acm::Header::parse(&std::fs::read(&src).unwrap()).unwrap();
     assert_eq!((h.channels, h.rate), (1, 44100));
     assert_eq!(std::fs::read(&src).unwrap()[14..], original[14..]);
