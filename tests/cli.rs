@@ -168,6 +168,28 @@ fn reads_raw_pcm() {
 }
 
 #[test]
+fn refuses_zero_and_out_of_range_values_before_reading() {
+    let d = Dir::new();
+    let (wav, raw, dst) = (d.path("a.wav"), d.path("a.raw"), d.path("b.acm"));
+    put(&wav, &stereo(), OutputFormat::Riff);
+    std::fs::write(&raw, [0; 4]).unwrap();
+    for args in [
+        &[s(&wav), s(&dst), "--rate", "0"][..],
+        &[s(&wav), s(&dst), "--channels", "0"],
+        &[s(&wav), s(&dst), "--input-rate", "0"],
+        &[s(&wav), s(&dst), "--quality", "11"],
+        &[s(&wav), s(&dst), "--quality", "-1.5"],
+        &[s(&raw), s(&dst), "--raw", "--raw-rate", "0"],
+        &[s(&raw), s(&dst), "--raw", "--raw-channels", "0"],
+        &[s(&raw), s(&dst), "--raw", "--raw-bits", "12"],
+    ] {
+        let out = ipsdoc(&[&["convert"], args].concat());
+        assert_eq!(out.status.code(), Some(2), "{args:?}: {}", all_output(&out));
+        assert!(!dst.exists(), "{args:?} wrote an output");
+    }
+}
+
+#[test]
 fn info_reports_headers_and_findings() {
     let d = Dir::new();
     let src = d.path("speech.acm");

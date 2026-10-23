@@ -1,5 +1,6 @@
 //! `ipsdoc`: converts, inspects, checks and repairs Interplay ACM, WAVC and other game sound files.
 
+use std::num::{NonZeroU16, NonZeroU32};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -7,7 +8,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use ipsdoc::acm::Overflow;
 use ipsdoc::detect::{Format, detect};
-use ipsdoc::input::{self, Note, Raw, ReadOptions};
+use ipsdoc::input::{self, Note, Raw, RawBits, ReadOptions};
 use ipsdoc::lip::{self, Lip};
 use ipsdoc::output::{self, OutputFormat, WriteOptions};
 use ipsdoc::repair::{self, Field};
@@ -67,6 +68,26 @@ enum To {
     Ogg,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum RawBitsArg {
+    /// Unsigned 8-bit.
+    #[value(name = "8")]
+    U8,
+    /// Signed 16-bit little-endian.
+    #[value(name = "16")]
+    S16,
+}
+
+/// A Vorbis quality on oggenc's scale, refused at parse time rather than after the input is read.
+fn vorbis_quality(s: &str) -> Result<f32, String> {
+    let q: f32 = s.parse().map_err(|e| format!("{e}"))?;
+    if (-1.0..=10.0).contains(&q) {
+        Ok(q)
+    } else {
+        Err(format!("{q} is not within -1 to 10"))
+    }
+}
+
 #[derive(Debug, Args)]
 struct ConvertArgs {
     /// The sound to read.
@@ -78,27 +99,27 @@ struct ConvertArgs {
     to: Option<To>,
     /// Resample to this rate.
     #[arg(long)]
-    rate: Option<u32>,
+    rate: Option<NonZeroU32>,
     /// Read the input as having this many channels, whatever its header and content say.
     #[arg(long)]
-    channels: Option<u16>,
+    channels: Option<NonZeroU16>,
     /// Read the input as having this rate, whatever its header says.
     #[arg(long)]
-    input_rate: Option<u32>,
+    input_rate: Option<NonZeroU32>,
     /// Read the input as headerless PCM (see --raw-rate, --raw-channels, --raw-bits).
     #[arg(long)]
     raw: bool,
     /// Raw input's rate.
-    #[arg(long, default_value_t = 22050, requires = "raw")]
-    raw_rate: u32,
+    #[arg(long, default_value = "22050", requires = "raw")]
+    raw_rate: NonZeroU32,
     /// Raw input's channels.
-    #[arg(long, default_value_t = 1, requires = "raw")]
-    raw_channels: u16,
-    /// Raw input's bits per sample: 16 (signed little-endian) or 8 (unsigned).
-    #[arg(long, default_value_t = 16, requires = "raw")]
-    raw_bits: u16,
+    #[arg(long, default_value = "1", requires = "raw")]
+    raw_channels: NonZeroU16,
+    /// Raw input's bits per sample.
+    #[arg(long, value_enum, default_value = "16", requires = "raw")]
+    raw_bits: RawBitsArg,
     /// Vorbis quality, -1 to 10.
-    #[arg(long, default_value_t = 5.0)]
+    #[arg(long, default_value_t = 5.0, value_parser = vorbis_quality)]
     quality: f32,
     /// Wrap ACM samples beyond 16 bits as the engines do (an audible click), instead of clamping them.
     #[arg(long)]
@@ -190,7 +211,10 @@ fn convert(a: &ConvertArgs) -> Result<(), Failure> {
         raw: a.raw.then_some(Raw {
             rate: a.raw_rate,
             channels: a.raw_channels,
-            bits: a.raw_bits,
+            bits: match a.raw_bits {
+                RawBitsArg::U8 => RawBits::U8,
+                RawBitsArg::S16 => RawBits::S16,
+            },
         }),
     };
     let loaded = input::read(&bytes, &opts).map_err(|e| fail(1, format!("{}: {}", a.input.display(), chain(&e))))?;
@@ -198,7 +222,7 @@ fn convert(a: &ConvertArgs) -> Result<(), Failure> {
         eprintln!("{}: {}", a.input.display(), describe(n));
     }
     let audio = match a.rate {
-        Some(r) => loaded.audio.resample(r).map_err(|e| fail(1, chain(&e)))?,
+        Some(r) => loaded.audio.resample(r.get()).map_err(|e| fail(1, chain(&e)))?,
         None => loaded.audio,
     };
     let out = output::write(

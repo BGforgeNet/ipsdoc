@@ -2,6 +2,7 @@
 //! content; raw PCM by description; everything else (RIFF, Ogg Vorbis, FLAC, MP3, AAC, ALAC) through Symphonia.
 
 use std::io::Cursor;
+use std::num::{NonZeroU16, NonZeroU32};
 
 use symphonia::core::audio::GenericAudioBufferRef;
 use symphonia::core::formats::TrackType;
@@ -20,22 +21,31 @@ pub struct ReadOptions {
     /// What to do with ACM samples beyond 16 bits.
     pub overflow: Overflow,
     /// The channel count to use, over the header and the content's evidence.
-    pub channels: Option<u16>,
+    pub channels: Option<NonZeroU16>,
     /// The rate to use, over the header.
-    pub rate: Option<u32>,
+    pub rate: Option<NonZeroU32>,
     /// Read the input as headerless PCM of this description.
     pub raw: Option<Raw>,
 }
 
-/// Headerless PCM: little-endian signed 16-bit, or unsigned 8-bit as in WAV.
+/// Headerless PCM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Raw {
     /// Frames per second.
-    pub rate: u32,
+    pub rate: NonZeroU32,
     /// Channels per frame.
-    pub channels: u16,
-    /// 8 or 16.
-    pub bits: u16,
+    pub channels: NonZeroU16,
+    /// The sample encoding.
+    pub bits: RawBits,
+}
+
+/// A headerless sample encoding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RawBits {
+    /// Unsigned 8-bit, as in WAV.
+    U8,
+    /// Signed 16-bit little-endian.
+    S16,
 }
 
 /// What reading found that the stored headers do not say.
@@ -90,19 +100,11 @@ pub enum InputError {
     /// The container holds no audio track, or a track without a sample rate or channel layout.
     #[error("no usable audio track")]
     NoAudio,
-    /// Raw input whose length is no whole number of samples.
-    #[error("{len} bytes of raw {bits}-bit PCM: not a whole number of samples")]
+    /// Raw 16-bit input of an odd length.
+    #[error("{len} bytes of raw 16-bit PCM: not a whole number of samples")]
     RawLength {
         /// Bytes given.
         len: usize,
-        /// Bits per sample.
-        bits: u16,
-    },
-    /// Raw input of an unsupported depth.
-    #[error("raw PCM must be 8 or 16 bits, not {bits}")]
-    RawBits {
-        /// Bits asked for.
-        bits: u16,
     },
 }
 
@@ -135,10 +137,10 @@ pub fn read(bytes: &[u8], opts: &ReadOptions) -> Result<Loaded, InputError> {
     };
     loaded.format = format;
     if let Some(c) = opts.channels {
-        loaded.audio.channels = c;
+        loaded.audio.channels = c.get();
     }
     if let Some(r) = opts.rate {
-        loaded.audio.rate = r;
+        loaded.audio.rate = r.get();
     }
     // The notes report what is used, overrides included.
     for n in &mut loaded.notes {
@@ -199,26 +201,23 @@ fn read_acm(stream: &[u8], wavc_channels: Option<u16>, opts: &ReadOptions) -> Re
 }
 
 fn read_raw(bytes: &[u8], raw: Raw) -> Result<Audio, InputError> {
-    let data: Vec<i32> = match raw.bits {
-        8 => bytes.iter().map(|&b| i32::from(b as i8 ^ i8::MIN) << 24).collect(),
-        16 if bytes.len().is_multiple_of(2) => bytes
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|&b| i32::from(i16::from_le_bytes(b)) << 16)
-            .collect(),
-        16 => {
-            return Err(InputError::RawLength {
-                len: bytes.len(),
-                bits: 16,
-            });
-        }
-        bits => return Err(InputError::RawBits { bits }),
+    let (bits, data): (u16, Vec<i32>) = match raw.bits {
+        RawBits::U8 => (8, bytes.iter().map(|&b| i32::from(b as i8 ^ i8::MIN) << 24).collect()),
+        RawBits::S16 if bytes.len().is_multiple_of(2) => (
+            16,
+            bytes
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|&b| i32::from(i16::from_le_bytes(b)) << 16)
+                .collect(),
+        ),
+        RawBits::S16 => return Err(InputError::RawLength { len: bytes.len() }),
     };
     Ok(Audio {
-        rate: raw.rate,
-        channels: raw.channels,
-        samples: Samples::Int { bits: raw.bits, data },
+        rate: raw.rate.get(),
+        channels: raw.channels.get(),
+        samples: Samples::Int { bits, data },
     })
 }
 
@@ -388,8 +387,8 @@ mod tests {
     fn options_override_the_header_and_the_evidence() {
         let b = acm_stream(&[1, 2, 3], 2, 17580);
         let opts = ReadOptions {
-            channels: Some(2),
-            rate: Some(22050),
+            channels: NonZeroU16::new(2),
+            rate: NonZeroU32::new(22050),
             ..ReadOptions::default()
         };
         let l = read(&b, &opts).unwrap();
@@ -444,18 +443,21 @@ mod tests {
     fn reads_raw_pcm_by_its_description() {
         let opts = |bits| ReadOptions {
             raw: Some(Raw {
-                rate: 22050,
-                channels: 1,
+                rate: NonZeroU32::new(22050).unwrap(),
+                channels: NonZeroU16::MIN,
                 bits,
             }),
             ..ReadOptions::default()
         };
-        let l = read(&[0x01, 0x80, 0xFF, 0x7F], &opts(16)).unwrap();
+        let l = read(&[0x01, 0x80, 0xFF, 0x7F], &opts(RawBits::S16)).unwrap();
         assert_eq!(l.audio.to_i16(), [-32767, 32767]);
         // 8-bit raw is unsigned, as in WAV.
-        let l = read(&[0x00, 0x80, 0xFF], &opts(8)).unwrap();
+        let l = read(&[0x00, 0x80, 0xFF], &opts(RawBits::U8)).unwrap();
         assert_eq!(l.audio.to_i16(), [-128 << 8, 0, 127 << 8]);
-        assert!(read(&[0; 3], &opts(16)).is_err());
+        assert!(matches!(
+            read(&[0; 3], &opts(RawBits::S16)),
+            Err(InputError::RawLength { len: 3 })
+        ));
     }
 
     #[test]
