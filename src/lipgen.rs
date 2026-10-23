@@ -6,12 +6,15 @@
 //! frame merge, shapes are held a minimum time, changes are capped per second, and pauses show the silent mouth.
 
 use crate::g2p::{self, Token};
-use crate::lip::{Lip, Marker};
+use crate::lip::{self, Lip, Marker};
 use crate::pcm::Audio;
 use crate::speech::{self, SpeechParams};
 
+/// Phoneme codes, one entry each in the per-code tables.
+const CODES: usize = lip::PHONEME_COUNT as usize;
+
 /// The head frame the engine shows for each phoneme code.
-pub const HEAD_FRAME: [u8; 42] = [
+pub const HEAD_FRAME: [u8; CODES] = [
     0, 3, 1, 1, 3, 1, 1, 1, 7, 8, 7, 3, 1, 8, 1, 7, 7, 6, 6, 2, 2, 2, 2, 4, 4, 5, 5, 2, 2, 2, 2, 2, 6, 2, 2, 5, 8, 2,
     2, 2, 2, 8,
 ];
@@ -82,7 +85,7 @@ struct Shape {
 
 impl Shape {
     fn frame(self) -> u8 {
-        HEAD_FRAME[usize::from(self.code.min(41))]
+        HEAD_FRAME[usize::from(self.code.min(lip::PHONEME_COUNT - 1))]
     }
 }
 
@@ -133,7 +136,7 @@ fn phrases(tokens: &[Token]) -> Vec<Vec<Word>> {
 
 /// Each code's typical length (ms): the median length of its shapes in Fallout 2's 1029 original lip files (shapes
 /// over 500 ms, held through a pause, left out). Nearly even: the original tool spaced shapes between anchors.
-const CODE_MS: [u16; 42] = [
+const CODE_MS: [u16; CODES] = [
     100, 112, 105, 124, 115, 113, 116, 111, 141, 143, 106, 111, 111, 96, 136, 138, 158, 102, 99, 91, 93, 99, 95, 108,
     106, 113, 97, 111, 104, 117, 103, 95, 105, 97, 98, 101, 104, 88, 91, 110, 103, 123,
 ];
@@ -512,7 +515,7 @@ mod tests {
     fn frame_at(lip: &Lip, secs: f32) -> u8 {
         let pos = 2 * (secs * RATE as f32) as i32;
         let i = lip.markers.iter().rposition(|m| m.position <= pos).unwrap_or(0);
-        HEAD_FRAME[usize::from(lip.phonemes.get(i).copied().unwrap_or(0).min(41))]
+        HEAD_FRAME[usize::from(lip.phonemes.get(i).copied().unwrap_or(0).min(lip::PHONEME_COUNT - 1))]
     }
 
     /// Each shape's head frame and length in seconds.
