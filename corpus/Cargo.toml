@@ -12,5 +12,5 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-flate2 = "=1.1.10"
 ipsdoc = { path = ".." }
+miniz_oxide = "=0.9.1"

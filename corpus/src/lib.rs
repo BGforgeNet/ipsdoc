@@ -97,9 +97,10 @@ pub fn inflate_bif(bytes: &[u8]) -> io::Result<Option<Vec<u8>>> {
             .get(at..at + len)
             .ok_or_else(|| invalid(format!("{len} bytes at {at} run past the end")))
     };
+    // Inflated no further than the size the header states, so a block claiming little cannot expand to much.
     let unzip = |z: &[u8], expected: usize| -> io::Result<Vec<u8>> {
-        let mut out = Vec::with_capacity(expected);
-        flate2::read::ZlibDecoder::new(z).read_to_end(&mut out)?;
+        let out = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(z, expected)
+            .map_err(|e| invalid(format!("block of size {expected} does not inflate: {e}")))?;
         if out.len() != expected {
             return Err(invalid(format!(
                 "block inflates to {} bytes, its header says size {expected}",
@@ -110,7 +111,8 @@ pub fn inflate_bif(bytes: &[u8]) -> io::Result<Option<Vec<u8>>> {
     };
     if bytes.starts_with(b"BIFCV1.0") {
         let total = field(8)?;
-        let (mut out, mut at) = (Vec::with_capacity(total), 12);
+        // Grown block by block: the header's total is not trusted for an allocation.
+        let (mut out, mut at) = (Vec::new(), 12);
         while at < bytes.len() {
             let (size, zlen) = (field(at)?, field(at + 4)?);
             out.extend(unzip(chunk(at + 8, zlen)?, size)?);
@@ -135,9 +137,7 @@ pub fn inflate_bif(bytes: &[u8]) -> io::Result<Option<Vec<u8>>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flate2::Compression;
-    use flate2::write::ZlibEncoder;
-    use std::io::{Cursor, Write};
+    use std::io::Cursor;
 
     /// A BIFF V1 with one entry per `(type, data)`, data after the entry table.
     fn biff(entries: &[(u16, &[u8])]) -> Vec<u8> {
@@ -162,9 +162,7 @@ mod tests {
     }
 
     fn zlib(data: &[u8]) -> Vec<u8> {
-        let mut e = ZlibEncoder::new(Vec::new(), Compression::default());
-        e.write_all(data).unwrap();
-        e.finish().unwrap()
+        miniz_oxide::deflate::compress_to_vec_zlib(data, 6)
     }
 
     #[test]
@@ -246,6 +244,18 @@ mod tests {
         bifc.extend_from_slice(&(z.len() as u32).to_le_bytes());
         bifc.extend_from_slice(&z);
         assert!(inflate_bif(&bifc).unwrap_err().to_string().contains("size"));
+    }
+
+    #[test]
+    fn stops_inflating_at_the_size_the_header_states() {
+        let z = zlib(&[0; 4096]);
+        let mut bif = b"BIF V1.0".to_vec();
+        bif.extend_from_slice(&0u32.to_le_bytes());
+        bif.extend_from_slice(&16u32.to_le_bytes());
+        bif.extend_from_slice(&(z.len() as u32).to_le_bytes());
+        bif.extend_from_slice(&z);
+        let err = inflate_bif(&bif).unwrap_err().to_string();
+        assert!(err.contains("block of size 16 does not inflate"), "{err}");
     }
 
     #[test]
