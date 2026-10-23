@@ -43,3 +43,22 @@ The `snd2acm` and `cross-tools` CI jobs compare with Interplay's `snd2acm.exe` (
 and AcmTools (built from source, `oracles/cross-tools.sh`): their output decodes in ours as in the engines, and
 AcmTools' decoder reads our lossless files exactly. The fixtures come from `cargo run -p oracles --bin fixtures --
 <dir>`; `oracles/tests/tools.rs` describes the directory the comparison reads.
+
+## Lip sync quality
+
+`oracles/tests/lips.rs` scores `ipsdoc lip` (with the line's text, and from the sound alone) and wav2lip against
+Fallout 2's own lip files, and asserts on half the speakers, the half `lipgen::Params` is not tuned on. It reads:
+
+- `IPSDOC_LIPS`: `sound/speech` from Fallout 2's `master.dat` (`dat3 x master.dat 'sound/speech/*'`), a directory
+  per speaker with each line's ACM and LIP.
+- `IPSDOC_MSG`: the Unofficial Patch's `data/text/english/dialog`, for each line's text.
+- `IPSDOC_LIPS_WAV2LIP`: wav2lip's lip file per line, named as the line. wav2lip (a 32-bit Windows program) runs
+  under wine on each line decoded to a 22050 Hz 16-bit stereo WAV (the mono channel twice), as
+  `wav2lip.exe -i <line>.wav -noACM -noAdj`; run it in a container with no network.
+
+```sh
+IPSDOC_LIPS=... IPSDOC_MSG=... IPSDOC_LIPS_WAV2LIP=... cargo test --release -p oracles --test lips -- --ignored --nocapture
+```
+
+`IPSDOC_LIPS_LIMIT=N` scores the first N lines of each half. The table it prints is the one to tune `Params` by,
+on the tuning half only.
