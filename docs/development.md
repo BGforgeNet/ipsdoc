@@ -19,6 +19,11 @@ Each built decoder also works by hand: `/path/to/oracles/bin/acm-gemrb in.acm ou
 PCM. Plain cargo commands leave the crate's tests out. libacm rejects `levels = 0` streams, so it checks only
 transformed files.
 
+## Damaged input
+
+`tests/malformed.rs` feeds every reader damaged copies of valid files and random bytes, seeded;
+`IPSDOC_MALFORMED_ROUNDS=N` (default 300) runs a longer sweep.
+
 ## Real files
 
 The `corpus` tool lists every sound stream under some directories (game installs, mod trees): loose files by

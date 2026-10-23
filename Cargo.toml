@@ -56,6 +56,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
+# symphonia-format-riff 0.6.1 multiplies a WAV's channel count by its sample width unchecked, only to log a block
+# align mismatch: release builds wrap there and read on, dev and test builds panic on a damaged header. Match release.
+[profile.dev.package.symphonia-format-riff]
+overflow-checks = false
+
 [profile.release]
 lto = true
 codegen-units = 1
