@@ -5,6 +5,8 @@
 //! the line. A position is a byte offset into the sound's decoded 16-bit data, all channels interleaved: 2 x a sample
 //! index, whatever rate or channel count the sound plays at.
 
+use std::path::{Path, PathBuf};
+
 /// Header size; phonemes start here.
 pub const HEADER_LEN: usize = 44;
 /// Where the length field (a big-endian `i32`) sits.
@@ -317,6 +319,20 @@ impl Lip {
             .take_while(|&&b| b != 0)
             .map(|&b| char::from(b))
             .collect()
+    }
+
+    /// The sound the game plays with this lip file, read from `path`: the ACM its name field names, beside it (the
+    /// name as stored or in lower case, `.acm` or `.ACM`). `None` when the name is empty or no such file exists.
+    pub fn sound_beside(&self, path: &Path) -> Option<PathBuf> {
+        let name = self.name();
+        if name.is_empty() {
+            return None;
+        }
+        let dir = path.parent().unwrap_or(Path::new("."));
+        [name.clone(), name.to_lowercase()]
+            .iter()
+            .flat_map(|n| ["acm", "ACM"].map(|ext| dir.join(format!("{n}.{ext}"))))
+            .find(|p| p.is_file())
     }
 
     /// The last marker's position: the sound's length in position units, by the markers.

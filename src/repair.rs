@@ -1,6 +1,7 @@
-//! Header fields an ACM or WAVC gets wrong, and their correction in place: no re-encoding, the bitstream untouched.
-//! The correct values are what reading establishes (`input::read`): the channel count the content supports, an
-//! unswapped rate, and WAVC sizes and fields that match the ACM inside.
+//! Header fields an ACM, WAVC or lip file gets wrong, and their correction in place: no re-encoding, the bitstream
+//! and the markers untouched. For a sound the correct values are what reading establishes (`input::read`): the
+//! channel count the content supports, an unswapped rate, and WAVC sizes and fields that match the ACM inside. For a
+//! lip file, its length field is its last marker; nothing else in it is repaired.
 
 use std::fs::OpenOptions;
 use std::io::{self, Seek, SeekFrom, Write};
@@ -8,6 +9,7 @@ use std::path::Path;
 
 use crate::analysis::swapped_rate;
 use crate::input::{self, InputError, ReadOptions};
+use crate::lip::{self, Lip};
 use crate::{acm, detect, wavc};
 
 /// A header field.
@@ -27,6 +29,8 @@ pub enum Field {
     WavcCompressed,
     /// The WAVC header's bits per sample.
     WavcBits,
+    /// A lip file's length field.
+    LipLength,
 }
 
 /// A wrong field and its correct value.
@@ -35,9 +39,9 @@ pub struct Fix {
     /// Which field.
     pub field: Field,
     /// As stored.
-    pub stored: u32,
+    pub stored: i64,
     /// As it should be.
-    pub correct: u32,
+    pub correct: i64,
 }
 
 /// Bytes to write over a file's own, at an offset.
@@ -110,7 +114,11 @@ pub fn fixes(bytes: &[u8]) -> Result<Repair, RepairError> {
     let mut fixes = Vec::new();
     let mut check = |field, stored: u32, correct: u32| {
         if stored != correct {
-            fixes.push(Fix { field, stored, correct });
+            fixes.push(Fix {
+                field,
+                stored: stored.into(),
+                correct: correct.into(),
+            });
         }
     };
     if let Some((w, c)) = headers {
@@ -138,6 +146,24 @@ pub fn fixes(bytes: &[u8]) -> Result<Repair, RepairError> {
         });
     }
     Ok(Repair { fixes, patches })
+}
+
+/// What a lip file needs: its length field set to its last marker.
+pub fn lip(l: &Lip) -> Repair {
+    if l.len == l.last() {
+        return Repair::default();
+    }
+    Repair {
+        fixes: vec![Fix {
+            field: Field::LipLength,
+            stored: l.len.into(),
+            correct: l.last().into(),
+        }],
+        patches: vec![Patch {
+            at: lip::LEN_OFFSET,
+            bytes: l.last().to_be_bytes().to_vec(),
+        }],
+    }
 }
 
 /// Writes `patches` over the file at `path`, in place. The file is never truncated or rewritten whole: a failure
@@ -260,6 +286,25 @@ mod tests {
         assert_eq!(r.patches.len(), 1);
         assert_eq!(r.patches[0].at, crate::wavc::Header::LEN);
         assert_eq!(fixes(&patched(&b, &r)).unwrap(), Repair::default());
+    }
+
+    #[test]
+    fn sets_a_lip_files_length_field_to_its_last_marker_and_nothing_else() {
+        let at = |position| lip::Marker { kind: 1, position };
+        let mut l = Lip::new("x", vec![0], vec![at(0), at(400)]);
+        assert_eq!(lip(&l), Repair::default());
+        l.len = 7;
+        let r = lip(&l);
+        assert_eq!(
+            r.fixes,
+            [Fix {
+                field: Field::LipLength,
+                stored: 7,
+                correct: 400
+            }]
+        );
+        let fixed = Lip::parse(&patched(&l.to_bytes(), &r)).unwrap();
+        assert_eq!(fixed, Lip { len: 400, ..l });
     }
 
     #[test]

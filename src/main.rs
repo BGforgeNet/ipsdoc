@@ -280,6 +280,7 @@ fn field_name(f: Field) -> &'static str {
         Field::WavcUncompressed => "WAVC uncompressed size",
         Field::WavcCompressed => "WAVC compressed size",
         Field::WavcBits => "WAVC bits",
+        Field::LipLength => "lip length field",
     }
 }
 
@@ -419,30 +420,40 @@ fn repair_files(files: &[PathBuf], dry_run: bool) -> Result<(), Failure> {
                 continue;
             }
         };
-        if lip::looks_like(&bytes) {
-            if !repair_lip(f, &bytes, dry_run) {
-                failed += 1;
-            }
-            continue;
-        }
-        let r = match repair::fixes(&bytes) {
+        // A lip file's other problems are reported, not repaired.
+        let found = if lip::looks_like(&bytes) {
+            Lip::parse(&bytes).map_err(|e| e.to_string()).map(|l| {
+                let kept = l.validate(Some(&base_name(f)));
+                (repair::lip(&l), kept)
+            })
+        } else {
+            repair::fixes(&bytes).map_err(|e| chain(&e)).map(|r| (r, Vec::new()))
+        };
+        let (r, kept) = match found {
             Ok(x) => x,
-            Err(e) => {
-                eprintln!("{}: {}", f.display(), chain(&e));
+            Err(message) => {
+                eprintln!("{}: {message}", f.display());
                 failed += 1;
                 continue;
             }
         };
         if r.fixes.is_empty() {
             println!("{}: nothing to repair", f.display());
-            continue;
         }
         for x in &r.fixes {
             println!("{}: {} {} -> {}", f.display(), field_name(x.field), x.stored, x.correct);
         }
-        if !dry_run && let Err(e) = repair::write(f, &r.patches) {
+        if !dry_run
+            && !r.patches.is_empty()
+            && let Err(e) = repair::write(f, &r.patches)
+        {
             eprintln!("{}: {e}", f.display());
             failed += 1;
+        }
+        for p in kept {
+            if !matches!(p, lip::Problem::Len { .. }) {
+                println!("{}: not repaired: {}: {p}", f.display(), severity(&p));
+            }
         }
     }
     if failed > 0 {
@@ -468,19 +479,10 @@ fn info_files(files: &[PathBuf]) -> Result<(), Failure> {
     }
 }
 
-/// The sound the game plays with a lip file: the ACM its name field names, beside it (the name as stored or in
-/// lower case, `.acm` or `.ACM`), decoded. `Ok(None)` when there is none; an error when it does not decode.
+/// The sound the game plays with a lip file ([`Lip::sound_beside`]), decoded. `Ok(None)` when there is none; an
+/// error when it does not decode.
 fn named_sound(lip: &Path, l: &Lip) -> Result<Option<(PathBuf, ipsdoc::pcm::Audio)>, String> {
-    let name = l.name();
-    if name.is_empty() {
-        return Ok(None);
-    }
-    let dir = lip.parent().unwrap_or(Path::new("."));
-    let found = [name.clone(), name.to_lowercase()]
-        .iter()
-        .flat_map(|n| ["acm", "ACM"].map(|ext| dir.join(format!("{n}.{ext}"))))
-        .find(|p| p.is_file());
-    let Some(p) = found else { return Ok(None) };
+    let Some(p) = l.sound_beside(lip) else { return Ok(None) };
     let bytes = std::fs::read(&p).map_err(|e| format!("{}: {e}", p.display()))?;
     let audio = input::read(&bytes, &ReadOptions::default())
         .map_err(|e| format!("{}: {}", p.display(), chain(&e)))?
@@ -582,37 +584,6 @@ fn check_lip(path: &Path, bytes: &[u8]) -> bool {
                 );
                 ok = false;
             }
-        }
-    }
-    ok
-}
-
-/// Sets a lip file's length field to its last marker, in place; reports anything else. Returns whether it read.
-fn repair_lip(path: &Path, bytes: &[u8], dry_run: bool) -> bool {
-    let l = match Lip::parse(bytes) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("{}: {e}", path.display());
-            return false;
-        }
-    };
-    let mut ok = true;
-    if l.len == l.last() {
-        println!("{}: nothing to repair", path.display());
-    } else {
-        println!("{}: lip length field {} -> {}", path.display(), l.len, l.last());
-        let patch = repair::Patch {
-            at: lip::LEN_OFFSET,
-            bytes: l.last().to_be_bytes().to_vec(),
-        };
-        if !dry_run && let Err(e) = repair::write(path, &[patch]) {
-            eprintln!("{}: {e}", path.display());
-            ok = false;
-        }
-    }
-    for p in l.validate(Some(&base_name(path))) {
-        if !matches!(p, lip::Problem::Len { .. }) {
-            println!("{}: not repaired: {}: {p}", path.display(), severity(&p));
         }
     }
     ok
