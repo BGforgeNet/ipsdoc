@@ -187,16 +187,9 @@ fn replace_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     written
 }
 
-fn convert(a: &ConvertArgs) -> Result<(), Failure> {
-    let bytes = read_file(&a.input)?;
-    let output = match &a.output {
-        Some(o) => o.clone(),
-        None => a.input.with_extension(match detect(&bytes) {
-            Format::Acm | Format::Wavc => "wav",
-            Format::Riff | Format::Ogg | Format::Other => "acm",
-        }),
-    };
-    let same = match (std::fs::canonicalize(&a.input), std::fs::canonicalize(&output)) {
+/// Refuses an `output` that is `input` itself, by any path to it.
+fn refuse_overwriting(input: &Path, output: &Path) -> Result<(), Failure> {
+    let same = match (std::fs::canonicalize(input), std::fs::canonicalize(output)) {
         (Ok(i), Ok(o)) => i == o,
         _ => false,
     };
@@ -209,6 +202,19 @@ fn convert(a: &ConvertArgs) -> Result<(), Failure> {
             ),
         ));
     }
+    Ok(())
+}
+
+fn convert(a: &ConvertArgs) -> Result<(), Failure> {
+    let bytes = read_file(&a.input)?;
+    let output = match &a.output {
+        Some(o) => o.clone(),
+        None => a.input.with_extension(match detect(&bytes) {
+            Format::Acm | Format::Wavc => "wav",
+            Format::Riff | Format::Ogg | Format::Other => "acm",
+        }),
+    };
+    refuse_overwriting(&a.input, &output)?;
     let format = match a.to {
         Some(To::Acm) => OutputFormat::Acm,
         Some(To::Wavc) => OutputFormat::Wavc,
@@ -636,8 +642,11 @@ fn lip_files(a: &LipArgs) -> Result<(), Failure> {
     if let (Some(l), Some(sound)) = (&a.rescale, &a.for_sound) {
         return rescale_lip(l, sound);
     }
-    if a.output.is_some() && a.sounds.len() > 1 {
-        return Err(fail(2, "--output takes a single sound"));
+    if let Some(o) = &a.output {
+        let [sound] = a.sounds.as_slice() else {
+            return Err(fail(2, "--output takes a single sound"));
+        };
+        refuse_overwriting(sound, o)?;
     }
     let entries = match &a.msg {
         Some(m) => Some(msg::parse(&read_file(m)?).map_err(|e| fail(1, format!("{}: {e}", m.display())))?),
@@ -704,7 +713,7 @@ fn lip_one(sound: &Path, a: &LipArgs, entries: Option<&[msg::Entry]>) -> Result<
     let l = lipgen::generate(&name, &audio, tokens.as_deref(), &lipgen::Params::default());
     let out = a.output.clone().unwrap_or_else(|| sound.with_extension("lip"));
     let replaced = out.exists();
-    std::fs::write(&out, l.to_bytes()).map_err(|e| fail(1, format!("{}: {e}", out.display())))?;
+    replace_file(&out, &l.to_bytes()).map_err(|e| fail(1, format!("{}: {e}", out.display())))?;
     if replaced {
         println!("{}: replaced", out.display());
     }

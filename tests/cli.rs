@@ -391,6 +391,22 @@ fn lip_writes_a_lip_and_an_empty_txt_beside_the_sound() {
 }
 
 #[test]
+fn lip_refuses_an_output_that_is_its_sound() {
+    let d = Dir::new();
+    let src = d.path("x.acm");
+    put(&src, &speech(), OutputFormat::Acm);
+    let before = std::fs::read(&src).unwrap();
+    let out = ipsdoc(&["lip", s(&src), "-o", s(&src)]);
+    assert_eq!(out.status.code(), Some(2), "{}", all_output(&out));
+    assert!(
+        all_output(&out).contains("would overwrite the input"),
+        "{}",
+        all_output(&out)
+    );
+    assert_eq!(std::fs::read(&src).unwrap(), before);
+}
+
+#[test]
 fn lip_reads_the_line_from_a_msg() {
     let d = Dir::new();
     let src = d.path("x.acm");
