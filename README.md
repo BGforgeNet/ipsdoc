@@ -14,13 +14,16 @@ Usage: `ipsdoc sound.wav sound.acm`
 | `ipsdoc info FILE...` | Shows the headers, how the file reads, and which header fields are wrong. |
 | `ipsdoc check PATH...` | Decodes each file named and, in directories (recursively), every ACM, WAVC, RIFF and Ogg file, and checks the lip files among them; fails if any does not decode, or a lip file is broken or does not fit the ACM beside it. |
 | `ipsdoc repair [--dry-run] FILE...` | Fixes wrong ACM and WAVC header fields, and lip files' length fields, in place, without re-encoding. |
-| `ipsdoc lip SOUND... [--msg FILE]` | Writes a Fallout lip-sync file beside each speech sound, from its line in a dialog `.msg` (or a `.txt` beside it), or from the sound alone; it names each lip file it replaces. |
+| `ipsdoc lip SOUND... [--msg FILE] [-o LIP]` | Writes a Fallout lip-sync file beside each speech sound (or to `-o`, for a single sound), from its line in a dialog `.msg` (or a `.txt` beside it), or from the sound alone; it names each lip file it replaces, and leaves an empty `.txt` (for LIP Editor) beside each lip file that has none. |
 | `ipsdoc lip --rescale LIP --for SOUND` | Rescales a lip file to another sound (another rate or channel count of the same recording). |
 
 `convert` options: `--to acm|wavc|wav|ogg` (otherwise from the output's extension), `--rate R` (resample),
 `--channels N` and `--input-rate R` (read the input as having these, whatever its header says), `--quality Q`
 (Vorbis, -1 to 10, default 5), `--raw` with `--raw-rate`, `--raw-channels`, `--raw-bits` (headerless PCM),
 `--wrap` (see below). `ipsdoc --help` and `ipsdoc <command> --help` list everything.
+
+Exit status: 0 when everything succeeded, 1 when a file failed (did not read, decode, check or write), 2 for a
+request that cannot be carried out (bad options, an output that would overwrite the input).
 
 ### Formats
 
@@ -66,10 +69,13 @@ Formats are recognised by content, not by name: an Infinity Engine `.wav` may ho
   either mismatch, phoneme codes the original game misreads (42 and up), and markers out of order. `check`, `info`
   and `repair` know a lip file by content: version 2 and the `VOC` extension field every original file has.
 
-### Building
+### Installing
 
-Install Rust (the version is pinned in `rust-toolchain.toml`) and a C compiler (for libvorbis), then
-`cargo build --release`. Development notes, the test oracles and the corpus tests: `docs/development.md`.
+Each release has an archive for Linux (x86-64), Windows (x86-64) and macOS (Apple silicon), holding the program and
+its notices; unpack it anywhere.
+
+To build it instead, install Rust (the version is pinned in `rust-toolchain.toml`) and a C compiler (for libvorbis),
+then `cargo build --release`. Development notes, the test oracles and the corpus tests: `docs/development.md`.
 
 ### Licence
 
