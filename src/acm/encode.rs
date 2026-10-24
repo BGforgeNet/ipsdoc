@@ -7,7 +7,7 @@
 //! files, and 0.78 for their decoded ACMs (about 3.4 times the lossy originals).
 
 use super::bitwriter::BitWriter;
-pub use super::header::Header;
+use super::header::Header;
 
 /// Rows per block. Smaller blocks fit `val` and the filler more tightly but rebuild the dequantisation table more
 /// often; a cost model over 663 RIFF files from the games and mods gave 0.880 of PCM size here against 0.872 at the

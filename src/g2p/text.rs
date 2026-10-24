@@ -3,7 +3,7 @@
 
 /// A piece of normalised text.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Piece {
+pub(super) enum Piece {
     /// A word, upper case: letters and apostrophes.
     Word(String),
     /// A word written in capitals in the text (`NCR`), which may be spelled out.
@@ -64,7 +64,7 @@ const NOISE: char = '\u{1}';
 const ABBREVIATIONS: &[(&str, &str)] = &[("DR", "DOCTOR"), ("MR", "MISTER"), ("MRS", "MISSUS"), ("MS", "MIZ")];
 
 /// Normalises a line of dialog.
-pub fn normalise(text: &str) -> Vec<Piece> {
+pub(super) fn normalise(text: &str) -> Vec<Piece> {
     tokenise(&brackets(&fold(text)))
 }
 

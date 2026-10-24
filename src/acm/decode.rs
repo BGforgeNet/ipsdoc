@@ -5,7 +5,7 @@
 //! ([`MAX_SAMPLES_PER_BIT`]) is refused before anything is decoded.
 
 use super::bitreader::BitReader;
-pub use super::header::{Header, HeaderError};
+use super::header::{Header, HeaderError};
 
 /// A decoded stream.
 #[derive(Debug, Clone, PartialEq, Eq)]

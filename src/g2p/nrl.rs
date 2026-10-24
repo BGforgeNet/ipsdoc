@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 use super::{Arpabet, Phone};
 
 /// The word's sounds by the rules; `word` is letters and apostrophes, any case.
-pub fn phones(word: &str) -> Vec<Phone> {
+pub(super) fn phones(word: &str) -> Vec<Phone> {
     symbols(word).into_iter().filter_map(phone).collect()
 }
 

@@ -1,8 +1,8 @@
 //! English text to Fallout lip-sync phonemes.
 
-pub mod dict;
-pub mod nrl;
-pub mod text;
+mod dict;
+mod nrl;
+mod text;
 
 /// An ARPAbet phoneme, as the CMU Pronouncing Dictionary writes them (39 symbols).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

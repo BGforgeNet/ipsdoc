@@ -9,7 +9,7 @@ use super::Phone;
 /// # Panics
 ///
 /// On first use, if the embedded dictionary does not inflate: the build made it, so that is a build defect.
-pub fn lookup(word: &str) -> Option<Vec<Phone>> {
+pub(super) fn lookup(word: &str) -> Option<Vec<Phone>> {
     let d = dict();
     let key = word.to_ascii_lowercase();
     let i = d
@@ -17,15 +17,6 @@ pub fn lookup(word: &str) -> Option<Vec<Phone>> {
         .binary_search_by(|&s| d.word(s).as_bytes().cmp(key.as_bytes()))
         .ok()?;
     d.phones(d.starts[i])
-}
-
-/// How many words the dictionary holds.
-///
-/// # Panics
-///
-/// As [`lookup`].
-pub fn len() -> usize {
-    dict().starts.len()
 }
 
 static PACKED: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/cmudict.deflate"));
@@ -109,7 +100,7 @@ mod tests {
     #[test]
     fn holds_every_word() {
         // Distinct words in cmudict.dict at the vendored commit (135166 lines, alternates included).
-        assert_eq!(len(), 126052);
+        assert_eq!(dict().starts.len(), 126052);
     }
 
     #[test]
