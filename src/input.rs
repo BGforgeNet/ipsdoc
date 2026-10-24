@@ -104,7 +104,18 @@ pub enum InputError {
         /// Bytes given.
         len: usize,
     },
+    /// More than [`MAX_SAMPLES`] samples decoded through Symphonia.
+    #[error("more than {max} samples; longer sounds are not read")]
+    TooLong {
+        /// The limit.
+        max: usize,
+    },
 }
+
+/// The most samples read through Symphonia, all channels together: 4 GiB of them, some 29 times the longest real
+/// stream. A silent Ogg Vorbis stream holds some 500 samples per byte (real ones at most 23), so no per-byte limit
+/// bounds memory as ACM's does; decoding packet by packet, keeping nothing, would bound `check` without one.
+pub const MAX_SAMPLES: usize = 1 << 30;
 
 /// Reads a sound held in memory.
 ///
@@ -129,7 +140,7 @@ pub fn read(bytes: &[u8], opts: &ReadOptions) -> Result<Loaded, InputError> {
         }
         Format::Riff | Format::Ogg | Format::Other => Loaded {
             format,
-            audio: read_general(bytes)?,
+            audio: read_general(bytes, MAX_SAMPLES)?,
             notes: Vec::new(),
         },
     };
@@ -214,8 +225,8 @@ fn read_raw(bytes: &[u8], raw: Raw) -> Result<Audio, InputError> {
     })
 }
 
-/// Decodes the default audio track through Symphonia, keeping integer samples at their depth.
-fn read_general(bytes: &[u8]) -> Result<Audio, InputError> {
+/// Decodes the default audio track through Symphonia, keeping integer samples at their depth; at most `max` samples.
+fn read_general(bytes: &[u8], max: usize) -> Result<Audio, InputError> {
     let mss = MediaSourceStream::new(Box::new(Cursor::new(bytes.to_vec())), Default::default());
     let mut reader = symphonia::default::get_probe()
         .probe(&Default::default(), mss, Default::default(), Default::default())
@@ -251,6 +262,9 @@ fn read_general(bytes: &[u8]) -> Result<Audio, InputError> {
             GenericAudioBufferRef::U32(_) | GenericAudioBufferRef::S32(_) => 32,
             GenericAudioBufferRef::F32(_) | GenericAudioBufferRef::F64(_) => 0,
         });
+        if ints.len() + floats.len() + buf.samples_interleaved() > max {
+            return Err(InputError::TooLong { max });
+        }
         if depth == 0 {
             buf.copy_to_vec_interleaved::<f32>(&mut part);
             floats.extend_from_slice(&part);
@@ -312,6 +326,20 @@ mod tests {
         assert_eq!(l.format, Format::Riff);
         assert_eq!((l.audio.rate, l.audio.channels, l.audio.bits()), (44100, 2, Some(16)));
         assert_eq!(l.audio.to_i16(), samples);
+    }
+
+    #[test]
+    fn refuses_more_samples_than_its_limit_integer_or_float() {
+        let ints = riff(16, false, 2, 22050, |w| {
+            (0..100).for_each(|s| w.write_sample(s as i16).unwrap())
+        });
+        let floats = riff(32, true, 2, 22050, |w| {
+            (0..100).for_each(|s| w.write_sample(s as f32).unwrap())
+        });
+        for b in [ints, floats] {
+            assert_eq!(read_general(&b, 100).unwrap().len(), 100);
+            assert!(matches!(read_general(&b, 99), Err(InputError::TooLong { max: 99 })));
+        }
     }
 
     #[test]

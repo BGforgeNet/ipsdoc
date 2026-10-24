@@ -11,3 +11,6 @@
 | Fallout lip sync (`.lip`)     | version 2                                                                                            | version 2                                                                                                       |
 
 Formats are recognised by content, not by name: an Infinity Engine `.wav` may hold RIFF, WAVC or Ogg Vorbis.
+
+A sound is read whole, so a RIFF, Ogg Vorbis, FLAC, MP3, AAC or ALAC sound of more than 2^30 samples (all channels
+together: some 3.4 hours of 44.1 kHz stereo) is not read.
