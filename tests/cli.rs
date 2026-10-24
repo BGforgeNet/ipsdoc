@@ -630,13 +630,38 @@ fn check_compares_a_lip_with_its_sound() {
         "{}",
         all_output(&out)
     );
-    // Made for another recording.
-    let mut other = good.clone();
-    other.rescale(good.last() * 1005 / 1000);
-    std::fs::write(&lip, other.to_bytes()).unwrap();
-    let out = ipsdoc(&["check", s(&lip)]);
+    // Ending `ms` off the 1 s sound, at 44.1 bytes a millisecond.
+    let off = |ms: i32| {
+        let mut l = good.clone();
+        l.rescale(good.last() + ms * 2 * 22050 / 1000);
+        std::fs::write(&lip, l.to_bytes()).unwrap();
+        ipsdoc(&["check", s(&lip)])
+    };
+    // Unseen on the talking heads: passes without a word.
+    let out = off(20);
+    ok(&out);
+    assert_eq!(String::from_utf8_lossy(&out.stderr), "");
+    // Perhaps seen: a warning.
+    let out = off(100);
+    ok(&out);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        format!("{}: warning: ends 100 ms after {}\n", s(&lip), s(&src))
+    );
+    let info = ok(&ipsdoc(&["info", s(&lip)]));
+    assert!(info.contains("1.000 s; the lip file ends 100 ms after it\n"), "{info}");
+    // Seen: an error.
+    let out = off(-200);
     assert_eq!(out.status.code(), Some(1));
-    assert!(all_output(&out).contains("another recording"), "{}", all_output(&out));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).starts_with(&format!(
+            "{}: error: ends 200 ms before {}\n",
+            s(&lip),
+            s(&src)
+        )),
+        "{}",
+        all_output(&out)
+    );
     // Within the rounding of a resample.
     let mut close = good.clone();
     close.rescale(good.last() + 2);
@@ -693,7 +718,7 @@ fn check_fits_the_sound_the_name_field_names() {
     assert_eq!(out.status.code(), Some(1), "{}", all_output(&out));
     let text = all_output(&out);
     assert!(text.contains("error: names sound A, the file is b"), "{text}");
-    assert!(!text.contains("another recording"), "{text}");
+    assert!(!text.contains(" ms "), "{text}");
 }
 
 #[test]

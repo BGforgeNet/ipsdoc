@@ -120,7 +120,7 @@ fn usable(name: &str, who: &str, l: &Lip, audio: &Audio, failures: &mut Vec<Stri
         .filter(|p| p.severity() == lip::Severity::Error)
         .map(ToString::to_string)
         .collect();
-    let fit = lip::fit(l.last(), audio.len());
+    let fit = lip::fit(l.last(), audio);
     if !errors.is_empty() || fit != lip::Fit::Matches {
         failures.push(format!("{who} {name}: {errors:?}, {fit:?}"));
         return false;
@@ -170,9 +170,9 @@ fn score_half(dirs: &[PathBuf], text: &HashMap<String, String>, wav2lip: &Path, 
         let audio = read(&std::fs::read(&acm).unwrap(), &ReadOptions::default())
             .unwrap_or_else(|e| panic!("{}: {e}", acm.display()))
             .audio;
-        // A few original lip files were made for another take of their line: no reference.
-        if lip::fit(original.last(), audio.len()) != lip::Fit::Matches {
-            *h.skipped.entry("original made for another recording").or_default() += 1;
+        // A few original lip files do not end with their sound: no exact reference.
+        if lip::fit(original.last(), &audio) != lip::Fit::Matches {
+            *h.skipped.entry("original does not fit its sound").or_default() += 1;
             continue;
         }
         let ours_text = generate(&name, &audio, Some(&tokens(line)), &p);
@@ -182,7 +182,7 @@ fn score_half(dirs: &[PathBuf], text: &HashMap<String, String>, wav2lip: &Path, 
         let ours_ok = usable(&name, "ours (text)", &ours_text, &audio, &mut h.failures)
             & usable(&name, "ours (audio)", &ours_audio, &audio, &mut h.failures);
         // wav2lip's own markers go backwards at times: only its length is held to the sound.
-        if !ours_ok || lip::fit(w2l.last(), audio.len()) != lip::Fit::Matches {
+        if !ours_ok || lip::fit(w2l.last(), &audio) != lip::Fit::Matches {
             *h.skipped.entry("a candidate did not fit its sound").or_default() += 1;
             continue;
         }

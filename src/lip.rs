@@ -7,6 +7,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::pcm::Audio;
+
 /// Header size; phonemes start here.
 pub const HEADER_LEN: usize = 44;
 /// Where the length field (a big-endian `i32`) sits.
@@ -177,21 +179,43 @@ impl std::fmt::Display for Problem {
     }
 }
 
-/// How a lip file's length (its last marker) fits a sound of `samples` interleaved samples.
+/// How a lip file's length (its last marker) fits a sound.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Fit {
     /// Made for this sound.
     Matches,
     /// Off by exactly this factor (2, 4, 1/2, 1/4): made for the sound at another rate or channel count.
     Scaled(f64),
-    /// Off by this ratio: made for another recording.
-    Other(f64),
+    /// Ends this many milliseconds after the sound (before it, when negative).
+    Off {
+        /// Milliseconds.
+        ms: f64,
+    },
 }
 
-/// How `last` (a lip file's last marker) fits a sound of `samples` samples: within 0.01% or 2 bytes, whichever is
-/// more (resampling rounds the sample count).
-pub fn fit(last: i32, samples: usize) -> Fit {
-    let want = 2.0 * samples as f64;
+/// Below this a lip file's timing error goes unseen on the talking heads: a mouth shape holds 110 ms (the median in
+/// Interplay's files), and viewers first notice sound ahead of the picture at about 45 ms (ITU-R BT.1359).
+const UNSEEN_MS: f64 = 50.0;
+/// Past this it is seen: more than a mouth shape, and past the 125 ms at which viewers notice sound lagging.
+const SEEN_MS: f64 = 150.0;
+
+impl Fit {
+    /// How much it matters, if at all.
+    pub fn severity(&self) -> Option<Severity> {
+        match self {
+            Fit::Matches => None,
+            Fit::Scaled(_) => Some(Severity::Error),
+            Fit::Off { ms } if ms.abs() < UNSEEN_MS => None,
+            Fit::Off { ms } if ms.abs() <= SEEN_MS => Some(Severity::Warning),
+            Fit::Off { .. } => Some(Severity::Error),
+        }
+    }
+}
+
+/// How `last` (a lip file's last marker) fits `sound`: within 0.01% or 2 bytes, whichever is more (resampling
+/// rounds the sample count).
+pub fn fit(last: i32, sound: &Audio) -> Fit {
+    let want = 2.0 * sound.len() as f64;
     let last = f64::from(last);
     let near = |a: f64, b: f64| (a - b).abs() <= (b * 1e-4).max(2.0);
     if near(last, want) {
@@ -202,7 +226,11 @@ pub fn fit(last: i32, samples: usize) -> Fit {
             return Fit::Scaled(factor);
         }
     }
-    Fit::Other(if want > 0.0 { last / want } else { f64::INFINITY })
+    // Two bytes a sample, all channels counted.
+    let frames = (last - want) / 2.0 / f64::from(sound.channels);
+    Fit::Off {
+        ms: frames * 1000.0 / f64::from(sound.rate),
+    }
 }
 
 fn read_i32(bytes: &[u8], at: usize) -> i32 {
@@ -609,18 +637,37 @@ mod tests {
         assert_eq!(lip.last(), 2000);
     }
 
+    /// `samples` mono samples at 1000 Hz: a byte of a lip file is half a millisecond.
+    fn sound(samples: usize) -> Audio {
+        Audio::from_i16(1000, 1, vec![0; samples])
+    }
+
     #[test]
     fn fits_by_the_last_marker() {
-        assert_eq!(fit(2000, 1000), Fit::Matches);
+        assert_eq!(fit(2000, &sound(1000)), Fit::Matches);
         // Within 2 bytes on a short sound, within 0.01% on a long one.
-        assert_eq!(fit(2002, 1000), Fit::Matches);
-        assert_eq!(fit(2_000_150, 1_000_000), Fit::Matches);
-        assert_eq!(fit(4000, 1000), Fit::Scaled(2.0));
-        assert_eq!(fit(8002, 1000), Fit::Scaled(4.0));
-        assert_eq!(fit(1000, 1000), Fit::Scaled(0.5));
-        assert_eq!(fit(500, 1000), Fit::Scaled(0.25));
-        // 0.2% short, as Cassidy Head's adam_dravean files are of their sounds.
-        assert!(matches!(fit(1996, 1000), Fit::Other(r) if (r - 0.998).abs() < 1e-9));
+        assert_eq!(fit(2002, &sound(1000)), Fit::Matches);
+        assert_eq!(fit(2_000_150, &sound(1_000_000)), Fit::Matches);
+        assert_eq!(fit(4000, &sound(1000)), Fit::Scaled(2.0));
+        assert_eq!(fit(8002, &sound(1000)), Fit::Scaled(4.0));
+        assert_eq!(fit(1000, &sound(1000)), Fit::Scaled(0.5));
+        assert_eq!(fit(500, &sound(1000)), Fit::Scaled(0.25));
+        // Ends 20 ms early; a stereo sound's samples count both channels.
+        assert_eq!(fit(1960, &sound(1000)), Fit::Off { ms: -20.0 });
+        assert_eq!(
+            fit(4080, &Audio::from_i16(1000, 2, vec![0; 2000])),
+            Fit::Off { ms: 20.0 }
+        );
+    }
+
+    #[test]
+    fn a_timing_error_matters_once_players_can_see_it() {
+        assert_eq!(Fit::Matches.severity(), None);
+        assert_eq!(Fit::Scaled(2.0).severity(), Some(Severity::Error));
+        assert_eq!(Fit::Off { ms: -49.0 }.severity(), None);
+        assert_eq!(Fit::Off { ms: 51.0 }.severity(), Some(Severity::Warning));
+        assert_eq!(Fit::Off { ms: -150.0 }.severity(), Some(Severity::Warning));
+        assert_eq!(Fit::Off { ms: 151.0 }.severity(), Some(Severity::Error));
     }
 
     #[test]

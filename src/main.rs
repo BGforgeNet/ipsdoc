@@ -521,7 +521,7 @@ fn repair_files(files: &[PathBuf], dry_run: bool) -> Result<(), Failure> {
         }
         for p in kept {
             if !matches!(p, lip::Problem::Len { .. }) {
-                println!("{}: not repaired: {}: {p}", f.display(), severity(&p));
+                println!("{}: not repaired: {}: {p}", f.display(), label(p.severity()));
             }
         }
     }
@@ -565,8 +565,8 @@ fn base_name(path: &Path) -> String {
         .unwrap_or_default()
 }
 
-fn severity(p: &lip::Problem) -> &'static str {
-    match p.severity() {
+fn label(s: lip::Severity) -> &'static str {
+    match s {
         lip::Severity::Error => "error",
         lip::Severity::Warning => "warning",
     }
@@ -587,10 +587,10 @@ fn lip_info(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
     match named_sound(path, &l) {
         Ok(Some((acm, audio))) => {
             let secs = audio.frames() as f64 / f64::from(audio.rate);
-            let fit = match lip::fit(l.last(), audio.len()) {
+            let fit = match lip::fit(l.last(), &audio) {
                 lip::Fit::Matches => "fits it".to_owned(),
                 lip::Fit::Scaled(f) => format!("is {f}x its length"),
-                lip::Fit::Other(r) => format!("is {r:.4} of its length"),
+                lip::Fit::Off { ms } => format!("ends {}", off_by(ms, "it")),
             };
             println!("  sound {}: {secs:.3} s; the lip file {fit}", acm.display());
         }
@@ -598,7 +598,7 @@ fn lip_info(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
         Err(e) => println!("  sound unreadable: {e}"),
     }
     for p in l.validate(Some(&base_name(path))) {
-        println!("  {}: {p}", severity(&p));
+        println!("  {}: {p}", label(p.severity()));
     }
     Ok(())
 }
@@ -614,7 +614,7 @@ fn check_lip(path: &Path, bytes: &[u8]) -> bool {
     };
     let mut ok = true;
     for p in l.validate(Some(&base_name(path))) {
-        eprintln!("{}: {}: {p}", path.display(), severity(&p));
+        eprintln!("{}: {}: {p}", path.display(), label(p.severity()));
         ok &= p.severity() != lip::Severity::Error;
     }
     let sound = match named_sound(path, &l) {
@@ -634,9 +634,10 @@ fn check_lip(path: &Path, bytes: &[u8]) -> bool {
         }
     };
     if let Some((acm, audio)) = sound {
-        match lip::fit(l.last(), audio.len()) {
-            lip::Fit::Matches => {}
-            lip::Fit::Scaled(f) => {
+        let fit = lip::fit(l.last(), &audio);
+        match (fit, fit.severity()) {
+            (_, None) | (lip::Fit::Matches, _) => {}
+            (lip::Fit::Scaled(f), _) => {
                 eprintln!(
                     "{}: made for another rate or channel count: its length is {f}x that of {} (ipsdoc lip --rescale \
                      if the sound is right, re-encode the sound if the lip file is)",
@@ -645,17 +646,24 @@ fn check_lip(path: &Path, bytes: &[u8]) -> bool {
                 );
                 ok = false;
             }
-            lip::Fit::Other(r) => {
+            (lip::Fit::Off { ms }, Some(s)) => {
                 eprintln!(
-                    "{}: made for another recording: its length is {r:.4} of that of {}",
+                    "{}: {}: ends {}",
                     path.display(),
-                    acm.display()
+                    label(s),
+                    off_by(ms, &acm.display().to_string())
                 );
-                ok = false;
+                ok &= s != lip::Severity::Error;
             }
         }
     }
     ok
+}
+
+/// `100 ms after <what>`, `20 ms before <what>`.
+fn off_by(ms: f64, what: &str) -> String {
+    let side = if ms < 0.0 { "before" } else { "after" };
+    format!("{:.0} ms {side} {what}", ms.abs())
 }
 
 /// `ipsdoc lip`.
@@ -753,7 +761,7 @@ fn rescale_lip(path: &Path, sound: &Path) -> Result<(), Failure> {
     replace_file(path, &l.to_bytes()).map_err(|e| fail(1, format!("{}: {e}", path.display())))?;
     println!("{}: last marker {old} -> {new_last}", path.display());
     for p in l.validate(Some(&base_name(path))) {
-        println!("{}: kept: {}: {p}", path.display(), severity(&p));
+        println!("{}: kept: {}: {p}", path.display(), label(p.severity()));
     }
     Ok(())
 }
