@@ -1,7 +1,9 @@
-//! Every real ACM and WAVC stream in a corpus decodes, in our decoder and GemRB's, exactly as in the Fallout 2
-//! engine's decoder. libacm and `infinitier` are run too and their differences counted, not failed: on real files
-//! they end at the last complete block when a stream ends inside its final block (most do), and `infinitier`
-//! saturates samples the engines wrap.
+//! Over a corpus of real files: every ACM and WAVC stream decodes as the engines decode it and re-encodes
+//! losslessly, and every RIFF and Ogg stream reads.
+//!
+//! Decoding: ours and GemRB's decoder must match the Fallout 2 engine's exactly. libacm and `infinitier` are run too
+//! and their differences counted, not failed: on real files they end at the last complete block when a stream ends
+//! inside its final block (most do), and `infinitier` saturates samples the engines wrap.
 //!
 //! Run with `IPSDOC_CORPUS=<manifest.tsv>` (from the `corpus` tool) and `IPSDOC_ORACLES` set, and `--ignored`.
 //! `IPSDOC_CORPUS_LIMIT=N` judges only the first N unique streams.
