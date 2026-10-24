@@ -12,6 +12,8 @@ use std::process::ExitCode;
 
 use corpus::{biff_sounds, inflate_bif, sniff};
 use ipsdoc::detect::Format as Container;
+// Pipe-safe: std's panic once a reader has gone.
+use ipsdoc::eprintln;
 
 #[derive(Default)]
 struct Scan {

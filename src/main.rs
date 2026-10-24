@@ -1,7 +1,7 @@
 //! `ipsdoc`: converts, inspects, checks and repairs Interplay ACM, WAVC and other game sound files.
 
 use std::collections::HashSet;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -15,26 +15,9 @@ use ipsdoc::lip::{self, Lip};
 use ipsdoc::output::{self, OutputFormat, WriteOptions};
 use ipsdoc::pcm::Audio;
 use ipsdoc::repair::{self, Field};
+// Pipe-safe: std's panic once a reader has gone (`ipsdoc info *.acm | head -1`).
+use ipsdoc::{eprintln, println};
 use ipsdoc::{g2p, lipgen, msg};
-
-// These replace std's, which panic once a reader has gone (`ipsdoc info *.acm | head -1`). Then the rest of the
-// output is dropped and the work goes on, as `repair` and `lip` change files; the exit status stays meaningful.
-macro_rules! println {
-    ($($arg:tt)*) => { emit(&mut std::io::stdout(), format_args!($($arg)*)) };
-}
-macro_rules! eprintln {
-    ($($arg:tt)*) => { emit(&mut std::io::stderr(), format_args!($($arg)*)) };
-}
-
-/// Writes a line. A closed pipe drops it; any other failure (a full disk) ends the run, as its output is incomplete.
-fn emit(w: &mut impl Write, line: std::fmt::Arguments<'_>) {
-    if let Err(e) = writeln!(w, "{line}")
-        && e.kind() != std::io::ErrorKind::BrokenPipe
-    {
-        let _ = writeln!(std::io::stderr(), "ipsdoc: writing output: {e}");
-        std::process::exit(1);
-    }
-}
 
 /// Converts, inspects, checks and repairs Interplay ACM, WAVC and other game sound files.
 ///

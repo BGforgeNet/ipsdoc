@@ -10,6 +10,10 @@
     clippy::expect_used,
     reason = "test harness code outside #[test] fns: a panic is the failure report"
 )]
+#![expect(
+    clippy::print_stderr,
+    reason = "a report helper the test calls: the test runner captures its output"
+)]
 
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{DefaultHasher, Hash, Hasher};

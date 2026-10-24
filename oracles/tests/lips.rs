@@ -14,6 +14,10 @@
     clippy::unwrap_used,
     reason = "test harness code outside #[test] fns: a panic is the failure report"
 )]
+#![expect(
+    clippy::print_stdout,
+    reason = "a report helper the test calls: the test runner captures its output"
+)]
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};

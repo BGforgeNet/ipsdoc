@@ -14,6 +14,8 @@ use std::process::ExitCode;
 use corpus::Row;
 use ipsdoc::acm;
 use ipsdoc::analysis::Features;
+// Pipe-safe: std's panic once a reader has gone (`features manifest.tsv | head`).
+use ipsdoc::{eprintln, println};
 
 fn run(manifest: &str) -> Result<(), String> {
     let text = std::fs::read_to_string(manifest).map_err(|e| format!("{manifest}: {e}"))?;

@@ -69,6 +69,10 @@ fn fixtures() -> Vec<Fixture> {
     ]
 }
 
+#[expect(
+    clippy::print_stderr,
+    reason = "a harness the cross-tool scripts run, never piped: its only output is an error, on stderr"
+)]
 fn main() -> ExitCode {
     let Some(dir) = std::env::args().nth(1) else {
         eprintln!("usage: fixtures <dir>");
