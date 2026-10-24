@@ -192,11 +192,10 @@ jobs:
           tool: cargo-about@0.9.2,cargo-zigbuild@0.23.4
       - run: rustup target add ${{ matrix.rust-targets }}
       - run: cargo zigbuild -p ipsdoc --release --locked --target ${{ matrix.target }}
-      - run: |
-          mkdir -p dist
-          cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" LICENSE dist/
-          cp data/cmudict/LICENSE dist/CMUDICT-LICENSE.txt
-          cargo about generate --locked about.hbs -o dist/THIRD-PARTY-NOTICES.txt
+      - run: .github/scripts/build-dist.sh
+        env:
+          TARGET: ${{ matrix.target }}
+          EXE: ${{ matrix.exe }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ipsdoc-${{ matrix.target }}
