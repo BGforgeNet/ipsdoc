@@ -24,6 +24,13 @@ transformed files.
 `tests/malformed.rs` feeds every reader damaged copies of valid files and random bytes, seeded;
 `IPSDOC_MALFORMED_ROUNDS=N` (default 300) runs a longer sweep.
 
+`fuzz/` holds coverage-guided fuzz targets for the readers (its own workspace; the gate only keeps it compiling).
+They run with cargo-fuzz on a nightly toolchain, one target at a time (`cargo fuzz list` names them):
+
+```sh
+cargo +nightly fuzz run acm -- -max_total_time=600
+```
+
 ## Real files
 
 The `corpus` tool lists every sound stream under some directories (game installs, mod trees): loose files by

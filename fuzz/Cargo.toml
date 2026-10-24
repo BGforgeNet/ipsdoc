@@ -1,0 +1,53 @@
+[package]
+name = "ipsdoc-fuzz"
+version = "0.0.0"
+description = "Fuzz targets for the readers of untrusted files (cargo fuzz)"
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# A workspace of its own: libFuzzer builds only under cargo-fuzz's nightly flags, so the main workspace leaves it out.
+[workspace]
+members = ["."]
+
+[dependencies]
+ipsdoc = { path = ".." }
+libfuzzer-sys = "=0.4.13"
+
+[[bin]]
+name = "acm"
+path = "fuzz_targets/acm.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wavc"
+path = "fuzz_targets/wavc.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lip"
+path = "fuzz_targets/lip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "msg"
+path = "fuzz_targets/msg.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "input"
+path = "fuzz_targets/input.rs"
+test = false
+doc = false
+bench = false
