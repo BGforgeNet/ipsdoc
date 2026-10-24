@@ -169,8 +169,13 @@ fn main() -> ExitCode {
     };
     let mut out = Out { manifest, extract };
     let mut scan = Scan::default();
+    // Absolute, as the extract directory is: the skip in `walk` compares the two, and the manifest's paths are then
+    // readable from any directory.
     for source in sources {
-        walk(source, &mut out, &mut scan);
+        match std::path::absolute(source) {
+            Ok(source) => walk(&source, &mut out, &mut scan),
+            Err(e) => scan.errors.push(format!("{}: {e}", source.display())),
+        }
     }
     if let Err(e) = out.manifest.flush() {
         scan.errors.push(format!("manifest: {e}"));
