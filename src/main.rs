@@ -256,7 +256,11 @@ fn convert(a: &ConvertArgs) -> Result<(), Failure> {
         },
     )
     .map_err(|e| fail(1, format!("{}: {}", output.display(), chain(&e))))?;
+    let replaced = output.exists();
     std::fs::write(&output, out).map_err(|e| fail(1, format!("{}: {e}", output.display())))?;
+    if replaced {
+        println!("{}: replaced", output.display());
+    }
     Ok(())
 }
 

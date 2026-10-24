@@ -110,6 +110,17 @@ fn without_an_output_an_acm_becomes_a_wav() {
 }
 
 #[test]
+fn converting_over_an_existing_output_says_so() {
+    let d = Dir::new();
+    let (src, dst) = (d.path("music.acm"), d.path("music.wav"));
+    put(&src, &stereo(), OutputFormat::Acm);
+    assert!(!ok(&ipsdoc(&[s(&src)])).contains("replaced"));
+    let again = ok(&ipsdoc(&[s(&src)]));
+    assert_eq!(again, format!("{}: replaced\n", s(&dst)));
+    assert_eq!(load(&dst), stereo());
+}
+
+#[test]
 fn refuses_to_write_over_its_input() {
     let d = Dir::new();
     let src = d.path("a.wav");
