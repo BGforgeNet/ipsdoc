@@ -42,6 +42,8 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
       - run: cargo deny --workspace check
+      # The fuzz workspace's own lockfile; its targets never ship, so their licences are not checked.
+      - run: cargo deny --manifest-path fuzz/Cargo.toml check advisories bans sources
       - run: cargo machete
       - run: shellcheck oracles/*.sh tests/*.sh .github/scripts/*.sh
       - run: .github/scripts/build-oxfmt.sh
