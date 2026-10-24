@@ -206,15 +206,13 @@ fn converts_at_a_negative_vorbis_quality() {
 fn info_reports_headers_and_findings() {
     let d = Dir::new();
     let src = d.path("speech.acm");
-    std::fs::write(&src, ipsdoc::acm::encode(&[1, 2, 3], 2, 17580).unwrap()).unwrap();
+    std::fs::write(&src, ipsdoc::acm::encode(&[1, 2, 3], 2, 22050).unwrap()).unwrap();
     let text = ok(&ipsdoc(&["info", s(&src)]));
     for needle in [
-        "ACM: 3 samples, 2 channels, 17580 Hz",
-        "reads as: 1 channels, 44100 Hz",
+        "ACM: 3 samples, 2 channels, 22050 Hz",
+        "reads as: 1 channels, 22050 Hz",
         "header 2, reads as 1 (odd sample count)",
-        "rate 17580 is 44100 byte-swapped",
         "wrong: ACM channels is 2, should be 1",
-        "wrong: ACM rate is 17580, should be 44100",
     ] {
         assert!(text.contains(needle), "{needle:?} missing from:\n{text}");
     }
@@ -255,15 +253,15 @@ fn check_fails_on_a_broken_file_and_names_it() {
 fn repair_fixes_headers_in_place_and_dry_run_does_not() {
     let d = Dir::new();
     let src = d.path("speech.acm");
-    let original = ipsdoc::acm::encode(&[1, 2, 3], 2, 17580).unwrap();
+    let original = ipsdoc::acm::encode(&[1, 2, 3], 2, 22050).unwrap();
     std::fs::write(&src, &original).unwrap();
     let dry = ok(&ipsdoc(&["repair", "--dry-run", s(&src)]));
-    assert!(dry.contains("ACM rate 17580 -> 44100 (dry run)"), "{dry}");
+    assert!(dry.contains("ACM channels 2 -> 1 (dry run)"), "{dry}");
     assert_eq!(std::fs::read(&src).unwrap(), original);
     let real = ok(&ipsdoc(&["repair", s(&src)]));
-    assert!(real.contains("ACM rate 17580 -> 44100\n"), "{real}");
+    assert!(real.contains("ACM channels 2 -> 1\n"), "{real}");
     let h = ipsdoc::acm::Header::parse(&std::fs::read(&src).unwrap()).unwrap();
-    assert_eq!((h.channels, h.rate), (1, 44100));
+    assert_eq!((h.channels, h.rate), (1, 22050));
     assert_eq!(std::fs::read(&src).unwrap()[14..], original[14..]);
 }
 

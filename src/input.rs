@@ -10,7 +10,6 @@ use symphonia::core::io::MediaSourceStream;
 
 use crate::acm::{self, Overflow};
 pub use crate::analysis::ChannelEvidence;
-use crate::analysis::swapped_rate;
 use crate::detect::Format;
 use crate::pcm::{Audio, Samples};
 use crate::wavc;
@@ -59,13 +58,6 @@ pub enum Note {
         used: u16,
         /// Why.
         evidence: ChannelEvidence,
-    },
-    /// The stored rate is a byte-swapped standard rate.
-    SwappedRate {
-        /// As stored.
-        stored: u16,
-        /// As used.
-        used: u32,
     },
     /// ACM samples beyond 16 bits, clamped or wrapped as [`ReadOptions::overflow`] says.
     Overflowed {
@@ -158,7 +150,6 @@ pub fn read(bytes: &[u8], opts: &ReadOptions) -> Result<Loaded, InputError> {
     for n in &mut loaded.notes {
         match n {
             Note::Channels { used, .. } => *used = loaded.audio.channels,
-            Note::SwappedRate { used, .. } => *used = loaded.audio.rate,
             Note::Overflowed { .. } => {}
         }
     }
@@ -189,22 +180,12 @@ fn read_acm(stream: &[u8], wavc_channels: Option<u16>, opts: &ReadOptions) -> Re
             evidence,
         });
     }
-    let rate = match swapped_rate(h.rate) {
-        Some(r) => {
-            notes.push(Note::SwappedRate {
-                stored: h.rate,
-                used: r.into(),
-            });
-            u32::from(r)
-        }
-        None => u32::from(h.rate),
-    };
     if decoded.stats.overflowed > 0 {
         notes.push(Note::Overflowed {
             samples: decoded.stats.overflowed,
         });
     }
-    let audio = Audio::from_i16(rate, channels, decoded.samples);
+    let audio = Audio::from_i16(h.rate.into(), channels, decoded.samples);
     Ok(Loaded {
         format: Format::Acm,
         audio,
@@ -385,19 +366,8 @@ mod tests {
     }
 
     #[test]
-    fn a_byte_swapped_rate_is_corrected() {
-        let b = acm_stream(&[0; 10], 1, 17580);
-        let l = read(&b, &ReadOptions::default()).unwrap();
-        assert_eq!(l.audio.rate, 44100);
-        assert!(l.notes.contains(&Note::SwappedRate {
-            stored: 17580,
-            used: 44100
-        }));
-    }
-
-    #[test]
     fn options_override_the_header_and_the_evidence() {
-        let b = acm_stream(&[1, 2, 3], 2, 17580);
+        let b = acm_stream(&[1, 2, 3], 2, 44100);
         let opts = ReadOptions {
             channels: NonZeroU16::new(2),
             rate: NonZeroU32::new(22050),
@@ -410,10 +380,6 @@ mod tests {
             header: 2,
             used: 2,
             evidence: ChannelEvidence::OddSampleCount
-        }));
-        assert!(l.notes.contains(&Note::SwappedRate {
-            stored: 17580,
-            used: 22050
         }));
     }
 

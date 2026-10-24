@@ -1,4 +1,4 @@
-//! What a stream's content says about its header: the true channel count and a byte-swapped rate.
+//! What a stream's content says about its header: the true channel count.
 //!
 //! Fallout's engine ignores the ACM channel field (it plays speech and effects mono, music stereo), so many of its
 //! mono files claim two channels. Such a file, read as stereo frames, alternates between consecutive samples of one
@@ -153,16 +153,6 @@ impl ChannelEvidence {
     }
 }
 
-/// Sample rates the games and their mods use.
-const STANDARD_RATES: [u16; 8] = [8000, 11025, 16000, 22050, 24000, 32000, 44100, 48000];
-
-/// The standard rate `rate` is a byte swap of, if it is not standard itself (the 1pp mod's 17580 is 44100 written
-/// big-endian).
-pub fn swapped_rate(rate: u16) -> Option<u16> {
-    let swapped = rate.swap_bytes();
-    (!STANDARD_RATES.contains(&rate) && STANDARD_RATES.contains(&swapped)).then_some(swapped)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,13 +286,5 @@ mod tests {
             .verdict(),
             Verdict::InterleavedMono
         );
-    }
-
-    #[test]
-    fn a_byte_swapped_standard_rate_is_recognised() {
-        assert_eq!(swapped_rate(17580), Some(44100));
-        assert_eq!(swapped_rate(0x2256), Some(22050));
-        assert_eq!(swapped_rate(22050), None);
-        assert_eq!(swapped_rate(12345), None);
     }
 }

@@ -52,7 +52,6 @@ Formats are recognised by content, not by name: an Infinity Engine `.wav` may ho
   odd. Known misreadings: Fallout's ambient `wind1`, `wind2` (Fallout 2) and `alarm1`, `alarm2` (Fallout 1) read as
   mono but play as stereo (use `--channels 2`); Fallout 2's `engineon` reads as stereo but plays as mono (use
   `--channels 1`).
-- **Rates.** A rate stored byte-swapped (17580 for 44100, as in some music packs) is read as meant; `repair` fixes it.
 - **Overflow.** Lossy ACMs sometimes hold a sample beyond 16 bits. The games wrap it to the other end of the range,
   an audible click; ipsdoc clamps it, and `info` counts them. `--wrap` reproduces the games exactly.
 - **Other players.** FFmpeg-based players cannot play most ACMs, lossless ones never; libacm-based tools cannot open

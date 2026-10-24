@@ -276,7 +276,6 @@ fn describe(n: &Note) -> String {
             };
             format!("channels: header {header}, reads as {used} ({why})")
         }
-        Note::SwappedRate { stored, used } => format!("rate {stored} is {used} byte-swapped; reads as {used} Hz"),
         Note::Overflowed { samples } => format!("{samples} samples beyond 16 bits"),
     }
 }
@@ -284,7 +283,6 @@ fn describe(n: &Note) -> String {
 fn field_name(f: Field) -> &'static str {
     match f {
         Field::AcmChannels => "ACM channels",
-        Field::AcmRate => "ACM rate",
         Field::WavcChannels => "WAVC channels",
         Field::WavcRate => "WAVC rate",
         Field::WavcUncompressed => "WAVC uncompressed size",

@@ -1,13 +1,12 @@
 //! Header fields an ACM, WAVC or lip file gets wrong, and their correction in place: no re-encoding, the bitstream
 //! and the markers untouched. For a sound the correct values are what reading establishes (`input::read`): the
-//! channel count the content supports, an unswapped rate, and WAVC sizes and fields that match the ACM inside. For a
-//! lip file, its length field is its last marker; nothing else in it is repaired.
+//! channel count the content supports, and WAVC sizes and fields that match the ACM inside. For a lip file, its length
+//! field is its last marker; nothing else in it is repaired.
 
 use std::fs::OpenOptions;
 use std::io::{self, Seek, SeekFrom, Write};
 use std::path::Path;
 
-use crate::analysis::swapped_rate;
 use crate::input::{self, InputError, ReadOptions};
 use crate::lip::{self, Lip};
 use crate::{acm, detect, wavc};
@@ -17,8 +16,6 @@ use crate::{acm, detect, wavc};
 pub enum Field {
     /// The ACM header's channel count.
     AcmChannels,
-    /// The ACM header's rate.
-    AcmRate,
     /// The WAVC header's channel count.
     WavcChannels,
     /// The WAVC header's rate.
@@ -108,8 +105,6 @@ pub fn fixes_read(bytes: &[u8], loaded: &input::Loaded) -> Result<Repair, Repair
     let a = acm::Header::parse(inner)
         .map_err(acm::DecodeError::from)
         .map_err(InputError::from)?;
-    // The rate reading uses, kept at the header's 16 bits: the stored one, unswapped.
-    let rate = swapped_rate(a.rate).unwrap_or(a.rate);
     // Each header as it should be, the fields reading cannot establish kept as stored.
     let headers = wavc_header.map(|w| {
         let correct = wavc::Header {
@@ -117,12 +112,12 @@ pub fn fixes_read(bytes: &[u8], loaded: &input::Loaded) -> Result<Repair, Repair
             compressed: inner.len() as u32,
             channels,
             bits: 16,
-            rate,
+            rate: a.rate,
             ..w
         };
         (w, correct)
     });
-    let correct_acm = acm::Header { channels, rate, ..a };
+    let correct_acm = acm::Header { channels, ..a };
     let mut fixes = Vec::new();
     let mut check = |field, stored: u32, correct: u32| {
         if stored != correct {
@@ -141,7 +136,6 @@ pub fn fixes_read(bytes: &[u8], loaded: &input::Loaded) -> Result<Repair, Repair
         check(Field::WavcBits, w.bits.into(), c.bits.into());
     }
     check(Field::AcmChannels, a.channels.into(), correct_acm.channels.into());
-    check(Field::AcmRate, a.rate.into(), correct_acm.rate.into());
     let mut patches = Vec::new();
     if let Some((w, c)) = headers
         && c != w
@@ -212,30 +206,23 @@ mod tests {
     }
 
     #[test]
-    fn fixes_an_acm_channel_count_and_a_swapped_rate() {
-        let b = acm::encode(&[1, 2, 3], 2, 17580).unwrap();
+    fn fixes_an_acm_channel_count() {
+        let b = acm::encode(&[1, 2, 3], 2, 22050).unwrap();
         let r = fixes(&b).unwrap();
         assert_eq!(
             r.fixes,
-            [
-                Fix {
-                    field: Field::AcmChannels,
-                    stored: 2,
-                    correct: 1
-                },
-                Fix {
-                    field: Field::AcmRate,
-                    stored: 17580,
-                    correct: 44100
-                }
-            ]
+            [Fix {
+                field: Field::AcmChannels,
+                stored: 2,
+                correct: 1
+            }]
         );
         // One patch, the ACM header alone.
         assert_eq!(r.patches.len(), 1);
         assert_eq!((r.patches[0].at, r.patches[0].bytes.len()), (0, acm::Header::LEN));
         let b = patched(&b, &r);
         let h = acm::Header::parse(&b).unwrap();
-        assert_eq!((h.channels, h.rate), (1, 44100));
+        assert_eq!((h.channels, h.rate), (1, 22050));
         assert_eq!(fixes(&b).unwrap(), Repair::default());
         // The bitstream is untouched: it decodes to the same samples.
         assert_eq!(acm::decode(&b).unwrap().samples, [1, 2, 3]);
