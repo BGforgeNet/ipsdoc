@@ -44,6 +44,11 @@ impl Audio {
         }
     }
 
+    /// True for integers deeper than 16 bits, and for float.
+    pub fn deeper_than_16(&self) -> bool {
+        !matches!(self.bits(), Some(b) if b <= 16)
+    }
+
     /// Samples, all channels together.
     pub fn len(&self) -> usize {
         match &self.samples {

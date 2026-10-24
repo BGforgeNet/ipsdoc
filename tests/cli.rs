@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ipsdoc::input::{ReadOptions, read};
 use ipsdoc::output::{OutputFormat, WriteOptions, write};
-use ipsdoc::pcm::Audio;
+use ipsdoc::pcm::{Audio, Samples};
 
 /// A scratch directory, removed when dropped.
 struct Dir(PathBuf);
@@ -153,6 +153,55 @@ fn converts_to_ogg_and_resamples() {
         (load(&wav).rate, load(&wav).frames(), load(&wav).bits()),
         (44100, 44100, Some(16))
     );
+}
+
+#[test]
+fn deep_wav_output_is_16_bit_unless_asked_for_the_full_depth() {
+    let d = Dir::new();
+    let (src, dst) = (d.path("deep.wav"), d.path("out.wav"));
+    let data = (0..1000).map(|n| (n * 7919 % 0x100_0000 - 0x80_0000) << 8).collect();
+    let deep = Audio {
+        rate: 44100,
+        channels: 1,
+        samples: Samples::Int { bits: 24, data },
+    };
+    let full = WriteOptions {
+        riff_full_depth: true,
+        ..WriteOptions::default()
+    };
+    std::fs::write(&src, write(&deep, OutputFormat::Riff, &full).unwrap()).unwrap();
+    let said = |input: &str| {
+        format!(
+            "{}: 16-bit, from {input} input: GemRB and Near Infinity read no deeper; --full-depth keeps it\n",
+            s(&dst)
+        )
+    };
+    let out = ipsdoc(&["convert", s(&src), s(&dst)]);
+    ok(&out);
+    assert_eq!(String::from_utf8_lossy(&out.stderr), said("24-bit"));
+    assert_eq!(load(&dst), Audio::from_i16(44100, 1, deep.to_i16()));
+    let out = ipsdoc(&["convert", "--full-depth", s(&src), s(&dst)]);
+    ok(&out);
+    assert_eq!(String::from_utf8_lossy(&out.stderr), "");
+    assert_eq!(load(&dst), deep);
+    // Vorbis decodes to float.
+    let ogg = d.path("a.ogg");
+    put(&ogg, &stereo(), OutputFormat::Ogg);
+    let out = ipsdoc(&["convert", s(&ogg), s(&dst)]);
+    ok(&out);
+    assert_eq!(String::from_utf8_lossy(&out.stderr), said("float"));
+    assert_eq!(load(&dst).bits(), Some(16));
+    // 16-bit input has nothing to say; other formats have no depth to keep.
+    let out = ipsdoc(&["convert", s(&d.path("out.wav")), s(&d.path("same.wav"))]);
+    ok(&out);
+    assert_eq!(String::from_utf8_lossy(&out.stderr), "");
+    let out = ipsdoc(&["convert", "--full-depth", s(&src), s(&d.path("out.acm"))]);
+    assert_eq!(out.status.code(), Some(2), "{}", all_output(&out));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "ipsdoc: --full-depth is for WAV output only\n"
+    );
+    assert!(!d.path("out.acm").exists());
 }
 
 #[test]

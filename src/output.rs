@@ -1,5 +1,6 @@
-//! Writing [`Audio`]: ACM and WAVC lossless with true headers (16-bit, so deeper audio is dithered), RIFF at the
-//! source depth, Ogg Vorbis through libvorbis (aoTuV and Lancer builds, via `vorbis_rs`).
+//! Writing [`Audio`]: ACM and WAVC lossless with true headers (16-bit, so deeper audio is dithered), RIFF at 8 or 16
+//! bits (deeper audio dithered to 16 unless asked to keep it), Ogg Vorbis through libvorbis (aoTuV and Lancer builds,
+//! via `vorbis_rs`).
 
 use std::io::Cursor;
 use std::num::{NonZeroU8, NonZeroU32};
@@ -41,11 +42,16 @@ impl OutputFormat {
 pub struct WriteOptions {
     /// Vorbis quality on oggenc's scale, -1 to 10.
     pub vorbis_quality: f32,
+    /// RIFF at the source's depth; otherwise audio deeper than 16 bits is dithered to 16.
+    pub riff_full_depth: bool,
 }
 
 impl Default for WriteOptions {
     fn default() -> Self {
-        WriteOptions { vorbis_quality: 5.0 }
+        WriteOptions {
+            vorbis_quality: 5.0,
+            riff_full_depth: false,
+        }
     }
 }
 
@@ -95,9 +101,17 @@ pub fn write(audio: &Audio, format: OutputFormat, opts: &WriteOptions) -> Result
     match format {
         OutputFormat::Acm => acm(audio),
         OutputFormat::Wavc => Ok(crate::wavc::wrap(&acm(audio)?)?),
+        OutputFormat::Riff if riff_dithers(audio, opts) => {
+            riff(&Audio::from_i16(audio.rate, audio.channels, audio.to_i16()))
+        }
         OutputFormat::Riff => riff(audio),
         OutputFormat::Ogg => vorbis(audio, opts.vorbis_quality),
     }
+}
+
+/// Whether RIFF output of `audio` is dithered to 16 bits: GemRB and Near Infinity read 8 and 16-bit integer PCM only.
+pub fn riff_dithers(audio: &Audio, opts: &WriteOptions) -> bool {
+    !opts.riff_full_depth && audio.deeper_than_16()
 }
 
 fn acm(audio: &Audio) -> Result<Vec<u8>, OutputError> {
@@ -195,51 +209,51 @@ mod tests {
         assert_eq!(back.audio, a);
     }
 
+    fn riff_round_trip(a: &Audio, opts: &WriteOptions) -> Audio {
+        read(&write(a, OutputFormat::Riff, opts).unwrap(), &ReadOptions::default())
+            .unwrap()
+            .audio
+    }
+
     #[test]
-    fn riff_keeps_the_source_depth() {
+    fn riff_is_16_bit_unless_asked_for_the_full_depth() {
         let data: Vec<i32> = (0..500).map(|n| (n * 104_729 % 0x100_0000 - 0x80_0000) << 8).collect();
-        for (bits, a) in [
-            (
-                24,
-                Audio {
-                    rate: 96000,
-                    channels: 1,
-                    samples: Samples::Int {
-                        bits: 24,
-                        data: data.clone(),
-                    },
-                },
-            ),
-            (
-                8,
-                Audio {
-                    rate: 8000,
-                    channels: 1,
-                    samples: Samples::Int {
-                        bits: 8,
-                        data: data.iter().map(|v| v & !0xFF_FFFF).collect(),
-                    },
-                },
-            ),
-        ] {
-            let back = read(
-                &write(&a, OutputFormat::Riff, &WriteOptions::default()).unwrap(),
-                &ReadOptions::default(),
-            )
-            .unwrap();
-            assert_eq!(back.audio, a, "{bits} bits");
-        }
-        let f = Audio {
+        let deep = Audio {
+            rate: 96000,
+            channels: 1,
+            samples: Samples::Int {
+                bits: 24,
+                data: data.clone(),
+            },
+        };
+        let float = Audio {
             rate: 44100,
             channels: 2,
             samples: Samples::Float(vec![0.0, 0.25, -0.5, 1.0]),
         };
-        let back = read(
-            &write(&f, OutputFormat::Riff, &WriteOptions::default()).unwrap(),
-            &ReadOptions::default(),
-        )
-        .unwrap();
-        assert_eq!(back.audio, f);
+        let eight = Audio {
+            rate: 8000,
+            channels: 1,
+            samples: Samples::Int {
+                bits: 8,
+                data: data.iter().map(|v| v & !0xFF_FFFF).collect(),
+            },
+        };
+        let full = WriteOptions {
+            riff_full_depth: true,
+            ..WriteOptions::default()
+        };
+        for a in [&deep, &float, &eight] {
+            assert_eq!(riff_round_trip(a, &full), *a);
+        }
+        // By default deeper audio is dithered to 16 bits, as for ACM; 8 bits stay as they are.
+        for a in [&deep, &float] {
+            assert_eq!(
+                riff_round_trip(a, &WriteOptions::default()),
+                Audio::from_i16(a.rate, a.channels, a.to_i16())
+            );
+        }
+        assert_eq!(riff_round_trip(&eight, &WriteOptions::default()), eight);
     }
 
     #[test]
@@ -294,7 +308,10 @@ mod tests {
     #[test]
     fn rejects_an_out_of_range_vorbis_quality() {
         let a = Audio::from_i16(44100, 1, vec![0; 100]);
-        let opts = WriteOptions { vorbis_quality: 11.0 };
+        let opts = WriteOptions {
+            vorbis_quality: 11.0,
+            ..WriteOptions::default()
+        };
         assert!(matches!(
             write(&a, OutputFormat::Ogg, &opts),
             Err(OutputError::VorbisQuality { .. })

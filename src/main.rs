@@ -13,6 +13,7 @@ use ipsdoc::detect::{self, Format, detect};
 use ipsdoc::input::{self, Note, Raw, RawBits, ReadOptions};
 use ipsdoc::lip::{self, Lip};
 use ipsdoc::output::{self, OutputFormat, WriteOptions};
+use ipsdoc::pcm::Audio;
 use ipsdoc::repair::{self, Field};
 use ipsdoc::{g2p, lipgen, msg};
 
@@ -65,7 +66,7 @@ enum To {
     Acm,
     /// WAVC, lossless (Infinity Engine sounds).
     Wavc,
-    /// RIFF WAV PCM, at the source's depth.
+    /// RIFF WAV PCM, 8 or 16-bit: deeper input is dithered to 16 bits, unless --full-depth.
     Wav,
     /// Ogg Vorbis.
     Ogg,
@@ -127,6 +128,10 @@ struct ConvertArgs {
     /// Wrap ACM samples beyond 16 bits as the engines do (an audible click), instead of clamping them.
     #[arg(long)]
     wrap: bool,
+    /// Write a WAV at the input's depth (24 or 32-bit, or float), which GemRB and Near Infinity cannot read, instead
+    /// of dithering it to 16 bits.
+    #[arg(long)]
+    full_depth: bool,
 }
 
 #[derive(Debug, Args)]
@@ -226,6 +231,9 @@ fn convert(a: &ConvertArgs) -> Result<(), Failure> {
             )
         })?,
     };
+    if a.full_depth && format != OutputFormat::Riff {
+        return Err(fail(2, "--full-depth is for WAV output only"));
+    }
     let opts = ReadOptions {
         overflow: if a.wrap { Overflow::Wrap } else { Overflow::Clamp },
         channels: a.channels,
@@ -247,20 +255,30 @@ fn convert(a: &ConvertArgs) -> Result<(), Failure> {
         Some(r) => loaded.audio.resample(r.get()).map_err(|e| fail(1, chain(&e)))?,
         None => loaded.audio,
     };
-    let out = output::write(
-        &audio,
-        format,
-        &WriteOptions {
-            vorbis_quality: a.quality,
-        },
-    )
-    .map_err(|e| fail(1, format!("{}: {}", output.display(), chain(&e))))?;
+    let write_opts = WriteOptions {
+        vorbis_quality: a.quality,
+        riff_full_depth: a.full_depth,
+    };
+    let out = output::write(&audio, format, &write_opts)
+        .map_err(|e| fail(1, format!("{}: {}", output.display(), chain(&e))))?;
     let replaced = output.exists();
     std::fs::write(&output, out).map_err(|e| fail(1, format!("{}: {e}", output.display())))?;
     if replaced {
         println!("{}: replaced", output.display());
     }
+    if format == OutputFormat::Riff && output::riff_dithers(&audio, &write_opts) {
+        eprintln!(
+            "{}: 16-bit, from {} input: GemRB and Near Infinity read no deeper; --full-depth keeps it",
+            output.display(),
+            depth(&audio)
+        );
+    }
     Ok(())
+}
+
+/// The sample format in words: `16-bit`, `float`.
+fn depth(a: &Audio) -> String {
+    a.bits().map_or_else(|| "float".to_owned(), |b| format!("{b}-bit"))
 }
 
 fn describe(n: &Note) -> String {
@@ -324,7 +342,7 @@ fn info(path: &Path) -> Result<(), Failure> {
     let loaded = input::read(&bytes, &ReadOptions::default())
         .map_err(|e| fail(1, format!("{}: {}", path.display(), chain(&e))))?;
     let a = &loaded.audio;
-    let depth = a.bits().map_or("float".to_owned(), |b| format!("{b}-bit"));
+    let depth = depth(a);
     println!(
         "  reads as: {} channels, {} Hz, {depth}, {} frames, {:.3} s",
         a.channels,
