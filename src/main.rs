@@ -268,7 +268,7 @@ fn convert(a: &ConvertArgs) -> Result<(), Failure> {
     }
     if format == OutputFormat::Riff && output::riff_dithers(&audio, &write_opts) {
         eprintln!(
-            "{}: 16-bit, from {} input: Infinity Engine games read WAV up to 16-bit; --full-depth keeps it",
+            "{}: 16-bit, from {} input: Infinity Engine games read WAV up to 16-bit; add --full-depth to get lossless output",
             output.display(),
             depth(&audio)
         );
