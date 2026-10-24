@@ -7,7 +7,12 @@ Also writes and checks Fallout's lip-sync files.
 
 ### Examples
 
-Convert:
+- [Convert](#convert)
+- [Inspect and repair](#inspect-and-repair)
+- [Check a directory](#check-a-directory)
+- [Lip sync](#lip-sync)
+
+#### Convert
 
 ```sh
 # ACM to WAV, beside the input: myn1003a.wav
@@ -26,7 +31,9 @@ ipsdoc myn1003a.ogg --to wavc override/MYN1003A.wav
 ipsdoc --rate 44100 myn1003a.acm myn1003a-44k.acm
 ```
 
-Inspect and fix a Fallout 2 speech file whose header claims stereo:
+#### Inspect and repair
+
+A Fallout 2 speech file whose header claims stereo:
 
 ```console
 $ ipsdoc info myn1003a.acm
@@ -43,14 +50,16 @@ $ ipsdoc repair myn1003a.acm
 myn1003a.acm: ACM channels 2 -> 1
 ```
 
-Check every sound and lip file in a directory:
+#### Check a directory
+
+Every sound and lip file in it, recursively:
 
 ```console
 $ ipsdoc check sound/sfx
 1361 sounds checked, 0 lip files checked, 0 failed
 ```
 
-Lip sync:
+#### Lip sync
 
 ```console
 $ ipsdoc lip --msg dialog/nhmyron.msg myn1003a.acm
