@@ -47,6 +47,10 @@ enum Command {
         /// Files or directories.
         #[arg(required = true)]
         paths: Vec<PathBuf>,
+        /// Dialog message files, or directories of them, giving each line's text: each lip file is then also judged
+        /// against its line's words (English).
+        #[arg(long)]
+        msg: Vec<PathBuf>,
     },
     /// Writes Fallout lip-sync files for speech: from each sound and its line's text (from a dialog MSG, or a
     /// transcript beside the sound), or from the sound alone; or rescales a lip file to another sound.
@@ -422,7 +426,31 @@ fn read_if_sound(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
     Ok(Some(bytes))
 }
 
-fn check(paths: &[PathBuf]) -> Result<(), Failure> {
+/// The entries of the message files `paths` names, a directory standing for the `.msg` files in it.
+fn load_msgs(paths: &[PathBuf]) -> Result<Vec<msg::Entry>, Failure> {
+    let mut entries = Vec::new();
+    for p in paths {
+        let files = if p.is_dir() {
+            let mut f: Vec<PathBuf> = std::fs::read_dir(p)
+                .map_err(|e| fail(1, format!("{}: {e}", p.display())))?
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|f| f.extension().is_some_and(|x| x.eq_ignore_ascii_case("msg")))
+                .collect();
+            f.sort();
+            f
+        } else {
+            vec![p.clone()]
+        };
+        for f in files {
+            entries.extend(msg::parse(&read_file(&f)?).map_err(|e| fail(1, format!("{}: {e}", f.display())))?);
+        }
+    }
+    Ok(entries)
+}
+
+fn check(paths: &[PathBuf], msgs: &[PathBuf]) -> Result<(), Failure> {
+    let entries = load_msgs(msgs)?;
+    let entries = (!msgs.is_empty()).then_some(entries.as_slice());
     let (mut checked, mut lips, mut failed) = (0u64, 0u64, 0u64);
     // Alignment per directory: a set of lip files is graded together, where chance evens out.
     let mut sets: BTreeMap<PathBuf, Vec<lipqual::Quality>> = BTreeMap::new();
@@ -453,7 +481,7 @@ fn check(paths: &[PathBuf]) -> Result<(), Failure> {
             };
             if lip::looks_like(&bytes) {
                 lips += 1;
-                let (ok, quality) = check_lip(&f, &bytes);
+                let (ok, quality) = check_lip(&f, &bytes, entries);
                 failed += u64::from(!ok);
                 if let Some(q) = quality {
                     sets.entry(f.parent().unwrap_or(Path::new("")).to_path_buf())
@@ -472,8 +500,12 @@ fn check(paths: &[PathBuf]) -> Result<(), Failure> {
     for (dir, files) in &sets {
         let Some(g) = lipqual::grade(files) else { continue };
         let alignment = g.alignment.map_or("not judged".to_owned(), |a| format!("{a:.2}"));
+        let closures = g
+            .closures
+            .map_or(String::new(), |c| format!(", lips closed {c:.2} times per m, b and p"));
         println!(
-            "{}: lip sync of {} lip files (medians): alignment {alignment}, mouth shut through {:.0}% of the loud speech",
+            "{}: lip sync of {} lip files (medians): alignment {alignment}, mouth shut through {:.0}% of the loud \
+             speech{closures}",
             dir.display(),
             g.files,
             100.0 * g.shut
@@ -613,7 +645,7 @@ fn lip_info(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
                 lip::Fit::Off { ms } => format!("ends {}", off_by(ms, "it")),
             };
             println!("  sound {}: {secs:.3} s; the lip file {fit}", acm.display());
-            let q = lipqual::quality(&l, &audio);
+            let q = lipqual::quality(&l, &audio, None);
             match (q.alignment, q.shut_while_loud) {
                 (Some(a), Some(s)) => println!(
                     "  sync: alignment {a:.2} (0.5 is chance), mouth shut through {:.0}% of the loud speech",
@@ -639,8 +671,9 @@ fn lip_info(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
 }
 
 /// Checks a lip file on its own and against the sound beside it; reports and returns whether it passes, and how well
-/// it follows the sound when that was judged.
-fn check_lip(path: &Path, bytes: &[u8]) -> (bool, Option<lipqual::Quality>) {
+/// it follows the sound when that was judged. With `entries`, the line's text is looked up by the sound the lip file
+/// names.
+fn check_lip(path: &Path, bytes: &[u8], entries: Option<&[msg::Entry]>) -> (bool, Option<lipqual::Quality>) {
     let l = match Lip::parse(bytes) {
         Ok(l) => l,
         Err(e) => {
@@ -695,7 +728,10 @@ fn check_lip(path: &Path, bytes: &[u8]) -> (bool, Option<lipqual::Quality>) {
         }
         // A lip file made for another length places its shapes by another sound: judging them here says nothing.
         if fit.severity() != Some(lip::Severity::Error) {
-            let q = lipqual::quality(&l, &audio);
+            let text = entries
+                .and_then(|e| msg::find(e, l.name().trim()))
+                .map(|f| g2p::tokens(&f.entry.text));
+            let q = lipqual::quality(&l, &audio, text.as_deref());
             for p in q.problems() {
                 eprintln!("{}: {}: {p}", path.display(), label(p.severity()));
                 ok &= p.severity() != lip::Severity::Error;
@@ -817,7 +853,7 @@ fn main() -> ExitCode {
     let result = match (&cli.command, &cli.convert) {
         (Some(Command::Convert(a)), _) | (None, Some(a)) => convert(a),
         (Some(Command::Info { files }), _) => info_files(files),
-        (Some(Command::Check { paths }), _) => check(paths),
+        (Some(Command::Check { paths, msg }), _) => check(paths, msg),
         (Some(Command::Repair { dry_run, files }), _) => repair_files(files, *dry_run),
         (Some(Command::Lip(a)), _) => lip_files(a),
         (None, None) => Err(fail(2, "nothing to do; see --help")),

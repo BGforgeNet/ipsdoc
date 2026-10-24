@@ -683,6 +683,23 @@ fn check_grades_how_lip_files_follow_their_sounds() {
         err.contains("warning: its lip files keep the mouth shut through 100% of the loud speech (median), over 35%"),
         "{err}"
     );
+    // With the lines' text, from a dialog file in a directory: the lips never close for their m, b and p.
+    std::fs::create_dir(d.path("dialog")).unwrap();
+    let lines: String = (0..15)
+        .map(|i| format!("{{{i}}}{{X{i:02}}}{{Maybe, Bob.}}\r\n"))
+        .collect();
+    std::fs::write(d.path("dialog/talk.msg"), lines).unwrap();
+    let out = ipsdoc(&["check", "--msg", s(&d.path("dialog")), s(&d.path("x00.lip"))]);
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains(&format!(
+            "{}: warning: the lips close 0 times for the line's 4 m, b and p, 0 of them nearby: made for another line?\n",
+            s(&d.path("x00.lip"))
+        )),
+        "{}",
+        all_output(&out)
+    );
+    let out = ipsdoc(&["check", "--msg", s(&d.path("none.msg")), s(&d.path("x00.lip"))]);
+    assert_eq!(out.status.code(), Some(1), "{}", all_output(&out));
 }
 
 #[test]

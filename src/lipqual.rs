@@ -1,12 +1,13 @@
-//! How well a lip file follows its sound, judged from the two alone: whether the mouth opens while the line is loud,
-//! and at what offset it follows the loudness best.
+//! How well a lip file follows its sound: whether the mouth opens while the line is loud, at what offset it follows
+//! the loudness best, and, given the line's text, whether the lips close for its m, b and p.
 //!
 //! The limits come from Fallout 2's 994 voiced lines whose lip file ends with its sound, against their own lip files
 //! (Interplay's), ours from the sound alone, wav2lip's, another line's lip file stretched to fit, and the original
-//! moved 200 ms late. This judges whether the mouth follows the loudness, not whether its shapes match the words.
+//! moved 200 ms late; the text from the Unofficial Patch's English dialog.
 
 use std::fmt;
 
+use crate::g2p::{Arpabet, Token};
 use crate::lip::{Lip, PHONEME_COUNT, Severity};
 use crate::lipgen::HEAD_FRAME;
 use crate::pcm::Audio;
@@ -37,8 +38,38 @@ const SET_MIN: usize = 15;
 /// sets of other lines' lip files 0.53 to 0.59 ...
 const SET_ALIGNMENT: f64 = 0.6;
 /// ... or above this median share of the loud speech shown shut: Fallout 2's directories have 0.06 to 0.25, ours
-/// 0.06 to 0.08 per speaker, wav2lip's 0.77 to 0.92.
+/// 0.06 to 0.08 per speaker, wav2lip's 0.77 to 0.92 ...
 const SET_SHUT: f64 = 0.35;
+/// ... or with a median of closures per m, b and p outside these: Fallout 2's directories have 0.75 to 1.43,
+/// wav2lip's 0 (it never closes the lips).
+const SET_CLOSURES: (f64, f64) = (0.5, 1.6);
+/// Interplay's lip files close the lips once per m, b or p of the text (the middle half of them exactly once); a
+/// lip file closing them at a ratio outside these ...
+const CLOSURES: (f64, f64) = (0.67, 1.5);
+/// ... with under this share of the m, b and p met by a closure nearby, fits another line: Interplay's 4%, another
+/// line's lip file stretched to fit 46%, wav2lip's all.
+const PLACED: f64 = 0.25;
+/// A closure meets an m, b or p within this many frames of where the sound falls with the line's phones spread
+/// evenly over its speech.
+const NEAR_FRAMES: f64 = 20.0;
+
+/// How a lip file's closed lips fit its line's text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextFit {
+    /// The text's m, b and p.
+    pub bilabials: usize,
+    /// The lip file's closed-lips shapes in or beside speech.
+    pub closures: usize,
+    /// The m, b and p met by a closure nearby.
+    pub placed: usize,
+}
+
+impl TextFit {
+    /// Closures per m, b and p; `None` for a text without them.
+    pub fn ratio(&self) -> Option<f64> {
+        (self.bilabials > 0).then(|| self.closures as f64 / self.bilabials as f64)
+    }
+}
 
 /// How a lip file follows its sound.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -53,6 +84,8 @@ pub struct Quality {
     pub offset: Option<(f64, f64)>,
     /// The sound's length in seconds.
     pub seconds: f64,
+    /// How the closed lips fit the line's text, when it was given.
+    pub text: Option<TextFit>,
 }
 
 /// A way a lip file fails its sound.
@@ -68,6 +101,8 @@ pub enum QualityProblem {
         /// Milliseconds.
         ms: f64,
     },
+    /// The lips close neither as often as the text has m, b and p, nor where they fall.
+    Closures(TextFit),
 }
 
 impl QualityProblem {
@@ -75,7 +110,7 @@ impl QualityProblem {
     pub fn severity(&self) -> Severity {
         match self {
             QualityProblem::Shut { .. } => Severity::Error,
-            QualityProblem::Offset { .. } => Severity::Warning,
+            QualityProblem::Offset { .. } | QualityProblem::Closures(_) => Severity::Warning,
         }
     }
 }
@@ -94,6 +129,11 @@ impl fmt::Display for QualityProblem {
                     ms.abs()
                 )
             }
+            QualityProblem::Closures(t) => write!(
+                f,
+                "the lips close {} times for the line's {} m, b and p, {} of them nearby: made for another line?",
+                t.closures, t.bilabials, t.placed
+            ),
         }
     }
 }
@@ -114,6 +154,13 @@ impl Quality {
         {
             out.push(QualityProblem::Offset { ms });
         }
+        if let Some(t) = self.text
+            && let Some(r) = t.ratio()
+            && !(CLOSURES.0..=CLOSURES.1).contains(&r)
+            && (t.placed as f64) < PLACED * t.bilabials as f64
+        {
+            out.push(QualityProblem::Closures(t));
+        }
         out
     }
 }
@@ -127,6 +174,8 @@ pub struct SetGrade {
     pub alignment: Option<f64>,
     /// Their median [`Quality::shut_while_loud`].
     pub shut: f64,
+    /// Their median [`TextFit::ratio`], when enough of them have text with m, b or p.
+    pub closures: Option<f64>,
 }
 
 /// A way a set of lip files fails its sounds.
@@ -136,6 +185,8 @@ pub enum SetProblem {
     Unaligned(f64),
     /// The mouths stay shut through this median share of the loud speech.
     Shut(f64),
+    /// The lips close this many times per m, b and p of the text (median).
+    Closures(f64),
 }
 
 impl fmt::Display for SetProblem {
@@ -151,6 +202,11 @@ impl fmt::Display for SetProblem {
                 100.0 * m,
                 100.0 * SET_SHUT
             ),
+            SetProblem::Closures(m) => write!(
+                f,
+                "its lip files close the lips {m:.2} times per m, b and p of their lines (median), outside {} to {}",
+                SET_CLOSURES.0, SET_CLOSURES.1
+            ),
         }
     }
 }
@@ -159,10 +215,12 @@ impl fmt::Display for SetProblem {
 pub fn grade(files: &[Quality]) -> Option<SetGrade> {
     let alignments: Vec<f64> = files.iter().filter_map(|q| q.alignment).collect();
     let shut: Vec<f64> = files.iter().filter_map(|q| q.shut_while_loud).collect();
+    let ratios: Vec<f64> = files.iter().filter_map(|q| q.text?.ratio()).collect();
     (shut.len() >= SET_MIN).then(|| SetGrade {
         files: shut.len(),
         alignment: (alignments.len() >= SET_MIN).then(|| median(&alignments)),
         shut: median(&shut),
+        closures: (ratios.len() >= SET_MIN).then(|| median(&ratios)),
     })
 }
 
@@ -177,6 +235,11 @@ impl SetGrade {
         }
         if self.shut > SET_SHUT {
             out.push(SetProblem::Shut(self.shut));
+        }
+        if let Some(c) = self.closures
+            && !(SET_CLOSURES.0..=SET_CLOSURES.1).contains(&c)
+        {
+            out.push(SetProblem::Closures(c));
         }
         out
     }
@@ -217,8 +280,9 @@ fn open(frame: u8) -> bool {
     frame != 0 && frame != 6
 }
 
-/// Judges `l` against `audio`. Not at all when `l` holds codes the game misreads: its shapes are unknown.
-pub fn quality(l: &Lip, audio: &Audio) -> Quality {
+/// Judges `l` against `audio`, and against the line's `text` when given. Not at all when `l` holds codes the game
+/// misreads: its shapes are unknown.
+pub fn quality(l: &Lip, audio: &Audio, text: Option<&[Token]>) -> Quality {
     let analysis = speech::analyse(audio, &SpeechParams::default());
     let db: Vec<f32> = analysis.frames.iter().map(|f| f.db).collect();
     let n = db.len();
@@ -229,6 +293,7 @@ pub fn quality(l: &Lip, audio: &Audio) -> Quality {
             alignment: None,
             offset: None,
             seconds,
+            text: None,
         };
     }
     let mut speaking = vec![false; n];
@@ -253,11 +318,54 @@ pub fn quality(l: &Lip, audio: &Audio) -> Quality {
             far = Some((a, f64::from(lag * 10)));
         }
     }
+    let span = (
+        analysis.segments.first().map_or(0, |s| s.start),
+        analysis.segments.last().map_or(0, |s| s.end.min(n)),
+    );
     Quality {
         shut_while_loud: (!loud.is_empty()).then(|| shut as f64 / loud.len() as f64),
         alignment: near,
         offset: far,
         seconds,
+        text: text.map(|t| text_fit(&shown, &speaking, span, t)),
+    }
+}
+
+/// Closed-lips shapes (head frame 6) in or within 50 ms of speech, against the text's m, b and p, each placed where
+/// it falls with the line's phones spread evenly over `span`, the frames from the first speech to the last.
+fn text_fit(shown: &[u8], speaking: &[bool], span: (usize, usize), text: &[Token]) -> TextFit {
+    let n = shown.len();
+    let mut closures = Vec::new();
+    let mut start = 0;
+    for i in 1..=n {
+        if i == n || shown[i] != shown[start] {
+            if shown[start] == 6 && speaking[start.saturating_sub(5)..(i + 5).min(n)].contains(&true) {
+                closures.push((start + i) as f64 / 2.0);
+            }
+            start = i;
+        }
+    }
+    let phones: Vec<bool> = text
+        .iter()
+        .filter_map(|t| if let Token::Word(p) = t { Some(p) } else { None })
+        .flatten()
+        .map(|p| matches!(p.sound, Arpabet::M | Arpabet::B | Arpabet::P))
+        .collect();
+    let (from, to) = (span.0 as f64, span.1 as f64);
+    let each = (to - from) / phones.len().max(1) as f64;
+    let placed = phones
+        .iter()
+        .enumerate()
+        .filter(|&(i, &b)| {
+            b && closures
+                .iter()
+                .any(|&c| (c - (from + (i as f64 + 0.5) * each)).abs() <= NEAR_FRAMES)
+        })
+        .count();
+    TextFit {
+        bilabials: phones.iter().filter(|&&b| b).count(),
+        closures: closures.len(),
+        placed,
     }
 }
 
@@ -334,7 +442,7 @@ mod tests {
     #[test]
     fn a_lip_file_made_from_its_sound_passes() {
         let audio = speech();
-        let q = quality(&generate("x", &audio, None, &Params::default()), &audio);
+        let q = quality(&generate("x", &audio, None, &Params::default()), &audio, None);
         assert!(q.shut_while_loud.unwrap() < 0.2, "{q:?}");
         assert!(q.alignment.unwrap() > 0.8, "{q:?}");
         assert_eq!(q.problems(), []);
@@ -343,7 +451,7 @@ mod tests {
     #[test]
     fn a_mouth_shut_through_the_speech_is_an_error() {
         let audio = speech();
-        let q = quality(&whole(0, &audio), &audio);
+        let q = quality(&whole(0, &audio), &audio, None);
         assert_eq!(q.problems(), [QualityProblem::Shut { share: 1.0 }]);
         assert_eq!(q.problems()[0].severity(), Severity::Error);
     }
@@ -356,7 +464,7 @@ mod tests {
         for m in &mut late.markers {
             m.position = (m.position + by).min(last);
         }
-        let q = quality(&late, &audio);
+        let q = quality(&late, &audio, None);
         let [QualityProblem::Offset { ms }] = q.problems()[..] else {
             panic!("{q:?}")
         };
@@ -371,8 +479,45 @@ mod tests {
     #[test]
     fn codes_the_game_misreads_are_not_judged() {
         let audio = speech();
-        let q = quality(&whole(PHONEME_COUNT, &audio), &audio);
+        let q = quality(&whole(PHONEME_COUNT, &audio), &audio, None);
         assert_eq!((q.shut_while_loud, q.alignment, q.problems()), (None, None, vec![]));
+    }
+
+    #[test]
+    fn closed_lips_are_counted_against_the_texts_m_b_and_p() {
+        let audio = speech();
+        // "Maybe, Bob": M EY B IY, B AA B: four, and a mouth that never closes for them.
+        let words = crate::g2p::tokens("Maybe, Bob.");
+        let q = quality(&whole(1, &audio), &audio, Some(&words));
+        let t = TextFit {
+            bilabials: 4,
+            closures: 0,
+            placed: 0,
+        };
+        assert_eq!(q.text, Some(t));
+        assert!(q.problems().contains(&QualityProblem::Closures(t)));
+        assert_eq!(QualityProblem::Closures(t).severity(), Severity::Warning);
+        // One closure for each (the ratio fits), or the right count misplaced, or none to make: no warning.
+        let with = |text| Quality { text: Some(text), ..q };
+        let fits = |t: TextFit| {
+            !with(t)
+                .problems()
+                .iter()
+                .any(|p| matches!(p, QualityProblem::Closures(_)))
+        };
+        assert!(fits(TextFit { closures: 4, ..t }));
+        assert!(fits(TextFit {
+            closures: 9,
+            placed: 1,
+            ..t
+        }));
+        assert!(!fits(TextFit {
+            closures: 9,
+            placed: 0,
+            ..t
+        }));
+        assert!(fits(TextFit { bilabials: 0, ..t }));
+        assert_eq!(quality(&whole(1, &audio), &audio, None).text, None);
     }
 
     #[test]
@@ -382,6 +527,7 @@ mod tests {
             alignment: Some(alignment),
             offset: None,
             seconds: 3.0,
+            text: None,
         };
         assert_eq!(grade(&vec![file(0.5, 0.9); SET_MIN - 1]), None);
         let good = grade(&vec![file(0.75, 0.1); SET_MIN]).unwrap();
@@ -396,5 +542,22 @@ mod tests {
         let g = grade(&vec![shut; SET_MIN]).unwrap();
         assert_eq!((g.alignment, g.problems()), (None, vec![SetProblem::Shut(1.0)]));
         assert_eq!(median(&[3.0, 1.0, 2.0, 10.0]), 2.5);
+        // With text: the median of closures per m, b and p.
+        let closing = |closures| Quality {
+            text: Some(TextFit {
+                bilabials: 4,
+                closures,
+                placed: 4,
+            }),
+            ..file(0.75, 0.1)
+        };
+        let g = grade(&vec![closing(4); SET_MIN]).unwrap();
+        assert_eq!((g.closures, g.problems()), (Some(1.0), vec![]));
+        let g = grade(&vec![closing(8); SET_MIN]).unwrap();
+        assert_eq!(g.problems(), [SetProblem::Closures(2.0)]);
+        assert_eq!(
+            grade(&vec![closing(0); SET_MIN]).unwrap().problems(),
+            [SetProblem::Closures(0.0)]
+        );
     }
 }
