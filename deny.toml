@@ -1,5 +1,10 @@
+[advisories]
+# A yanked release was pulled by its author, usually for a defect.
+yanked = "deny"
+
 [licenses]
 unused-allowed-license = "deny"
+# The same list as `accepted` in about.toml, which writes the release's notices: change both together.
 allow = [
     "GPL-3.0-only",
     "GPL-3.0-or-later",
@@ -13,8 +18,17 @@ allow = [
 [bans]
 multiple-versions = "deny"
 highlight = "all"
+# A `*` requirement accepts any future release, breaking or malicious; the workspace's path dependencies are
+# exempt, every crate being `publish = false`.
+wildcards = "deny"
+allow-wildcard-paths = true
 skip = [
     # rubato's `visibility` macro is still on syn 2 while thiserror is on syn 3; a proc-macro dependency, built for
     # the host only, so nothing of either ships in the binary.
     { crate = "syn@2.0.119", reason = "build-time only, via rubato's visibility macro" },
 ]
+
+[sources]
+# A dependency from a registry or git repository nobody listed is a dependency nobody chose.
+unknown-registry = "deny"
+unknown-git = "deny"
