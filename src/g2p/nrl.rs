@@ -6,7 +6,7 @@
 //! `^` one consonant, `+` one of E I Y, `.` a voiced consonant, `%` a suffix, `&` a sibilant, `@` a consonant that
 //! changes a following long U; a space is a word boundary. Vowels are A E I O U Y.
 
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 use super::{Arpabet, Phone};
 
@@ -195,14 +195,15 @@ static RULES_TXT: &str = include_str!("../../data/nrl/rules.txt");
     clippy::expect_used,
     reason = "the rules are fixed data; `every_rule_reads` checks each line, so a failure is a defect in that file"
 )]
+static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
+    RULES_TXT
+        .lines()
+        .map(|l| Rule::parse(l).expect("data/nrl/rules.txt lines are A[B]C=/D/ rules"))
+        .collect()
+});
+
 fn rules() -> &'static [Rule] {
-    static RULES: OnceLock<Vec<Rule>> = OnceLock::new();
-    RULES.get_or_init(|| {
-        RULES_TXT
-            .lines()
-            .map(|l| Rule::parse(l).expect("data/nrl/rules.txt lines are A[B]C=/D/ rules"))
-            .collect()
-    })
+    &RULES
 }
 
 #[cfg(test)]

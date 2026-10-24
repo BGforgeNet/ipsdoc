@@ -1,6 +1,6 @@
 //! The CMU Pronouncing Dictionary (`data/cmudict/`), built into the binary compressed.
 
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 use super::Phone;
 
@@ -48,17 +48,18 @@ impl Dict {
     clippy::expect_used,
     reason = "the embedded dictionary is build output; a failure here is a build defect, not an input error"
 )]
+static DICT: LazyLock<Dict> = LazyLock::new(|| {
+    let bytes = miniz_oxide::inflate::decompress_to_vec(PACKED).expect("build.rs deflated the dictionary");
+    let text = String::from_utf8(bytes).expect("cmudict.dict is ASCII");
+    let starts = std::iter::once(0)
+        .chain(text.match_indices('\n').map(|(i, _)| i + 1))
+        .filter(|&s| s < text.len())
+        .collect();
+    Dict { text, starts }
+});
+
 fn dict() -> &'static Dict {
-    static DICT: OnceLock<Dict> = OnceLock::new();
-    DICT.get_or_init(|| {
-        let bytes = miniz_oxide::inflate::decompress_to_vec(PACKED).expect("build.rs deflated the dictionary");
-        let text = String::from_utf8(bytes).expect("cmudict.dict is ASCII");
-        let starts = std::iter::once(0)
-            .chain(text.match_indices('\n').map(|(i, _)| i + 1))
-            .filter(|&s| s < text.len())
-            .collect();
-        Dict { text, starts }
-    })
+    &DICT
 }
 
 #[cfg(test)]
