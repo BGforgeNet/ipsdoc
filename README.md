@@ -5,6 +5,25 @@ RIFF WAV and Ogg Vorbis files their mods use.
 
 Also writes and checks Fallout's lip-sync files.
 
+### Commands
+
+| Command                                      | Does                                                                                                                                                                                                                                                                                             |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ipsdoc IN [OUT]`, `ipsdoc convert IN [OUT]` | Converts. Without `OUT`: an ACM or WAVC becomes a `.wav`, anything else an `.acm`, beside the input (a WAVC already named `.wav` needs an `OUT`). It names an output it replaces.                                                                                                                |
+| `ipsdoc info FILE...`                        | Shows the headers, how the file reads, and which header fields are wrong.                                                                                                                                                                                                                        |
+| `ipsdoc check PATH...`                       | Decodes each file named and, in directories (recursively), every ACM, WAVC, RIFF and Ogg file, and checks the lip files among them; fails if any does not decode, or a lip file is broken or does not fit the ACM beside it.                                                                     |
+| `ipsdoc repair [--dry-run] FILE...`          | Fixes wrong ACM and WAVC header fields, and lip files' length fields, in place, without re-encoding.                                                                                                                                                                                             |
+| `ipsdoc lip SOUND... [--msg FILE] [-o LIP]`  | Writes a Fallout lip-sync file beside each speech sound (or to `-o`, for a single sound), from its line in a dialog `.msg` (or a `.txt` beside it), or from the sound alone; it names each lip file it replaces, and leaves an empty `.txt` (for LIP Editor) beside each lip file that has none. |
+| `ipsdoc lip --rescale LIP --for SOUND`       | Rescales a lip file to another sound (another rate or channel count of the same recording).                                                                                                                                                                                                      |
+
+`convert` options: `--to acm|wavc|wav|ogg` (otherwise from the output's extension), `--rate R` (resample),
+`--channels N` and `--input-rate R` (read the input as having these, whatever its header says), `--quality Q` (Vorbis,
+-1 to 10, default 5), `--raw` with `--raw-rate`, `--raw-channels`, `--raw-bits` (headerless PCM), `--wrap` (see
+`docs/quirks.md`). `ipsdoc --help` and `ipsdoc <command> --help` list everything.
+
+Exit status: 0 when everything succeeded, 1 when a file failed (did not read, decode, check or write), 2 for a request
+that cannot be carried out (bad options, an output that would overwrite the input).
+
 ### Examples
 
 - [Convert](#convert)
@@ -68,25 +87,6 @@ myn1003a.lip: replaced
 $ ipsdoc lip --rescale myn1003a.lip --for myn1003a-44k.acm
 myn1003a.lip: last marker 327380 -> 654760
 ```
-
-### Commands
-
-| Command                                      | Does                                                                                                                                                                                                                                                                                             |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ipsdoc IN [OUT]`, `ipsdoc convert IN [OUT]` | Converts. Without `OUT`: an ACM or WAVC becomes a `.wav`, anything else an `.acm`, beside the input (a WAVC already named `.wav` needs an `OUT`). It names an output it replaces.                                                                                                                |
-| `ipsdoc info FILE...`                        | Shows the headers, how the file reads, and which header fields are wrong.                                                                                                                                                                                                                        |
-| `ipsdoc check PATH...`                       | Decodes each file named and, in directories (recursively), every ACM, WAVC, RIFF and Ogg file, and checks the lip files among them; fails if any does not decode, or a lip file is broken or does not fit the ACM beside it.                                                                     |
-| `ipsdoc repair [--dry-run] FILE...`          | Fixes wrong ACM and WAVC header fields, and lip files' length fields, in place, without re-encoding.                                                                                                                                                                                             |
-| `ipsdoc lip SOUND... [--msg FILE] [-o LIP]`  | Writes a Fallout lip-sync file beside each speech sound (or to `-o`, for a single sound), from its line in a dialog `.msg` (or a `.txt` beside it), or from the sound alone; it names each lip file it replaces, and leaves an empty `.txt` (for LIP Editor) beside each lip file that has none. |
-| `ipsdoc lip --rescale LIP --for SOUND`       | Rescales a lip file to another sound (another rate or channel count of the same recording).                                                                                                                                                                                                      |
-
-`convert` options: `--to acm|wavc|wav|ogg` (otherwise from the output's extension), `--rate R` (resample),
-`--channels N` and `--input-rate R` (read the input as having these, whatever its header says), `--quality Q` (Vorbis,
--1 to 10, default 5), `--raw` with `--raw-rate`, `--raw-channels`, `--raw-bits` (headerless PCM), `--wrap` (see
-`docs/quirks.md`). `ipsdoc --help` and `ipsdoc <command> --help` list everything.
-
-Exit status: 0 when everything succeeded, 1 when a file failed (did not read, decode, check or write), 2 for a request
-that cannot be carried out (bad options, an output that would overwrite the input).
 
 ### Formats
 
