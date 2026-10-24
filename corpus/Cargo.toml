@@ -13,4 +13,4 @@ workspace = true
 
 [dependencies]
 ipsdoc = { path = ".." }
-miniz_oxide = "=0.9.1"
+miniz_oxide.workspace = true
