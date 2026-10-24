@@ -11,15 +11,20 @@
   for another rate or channel count), is an error. `check`, `info` and `repair` know a lip file by content: version 2
   and the `VOC` extension field every original file has.
 - **Quality.** `check` also judges how well each lip file follows its sound, from the two alone: a mouth shut through
-  more than half the loud speech is an error; one that follows the sound clearly better 150 to 300 ms off is a warning
-  naming the offset (on lines of 2 s or more). A directory of 15 or more lip files gets a grade, the medians of its
-  files' alignment (the chance that an open-mouth frame of speech is louder than a shut one: 0.5 is chance) and of their
-  shut-while-loud share, with a warning below 0.6 or above 35%. Fallout 2's own speech directories grade 0.64 to 0.82
-  and 6 to 25%. `info` shows each file's figures.
-- **Against the words.** Given the lines' text (`check --msg dialog/`, a dialog file or a directory of them, English),
-  `check` also counts the closed-lips shapes against each line's m, b and p, a run of them (the m b of "remember")
-  counted once: Interplay's files close the lips once for each. A lip file closing them under 0.67 or over 1.5 times as
-  often, with under a quarter of the m, b and p met by a closure near where they fall, gets a warning. That warns on 3%
-  of Fallout 2's own files, 2% of `ipsdoc lip --msg`'s, 28% of `ipsdoc lip`'s from the sound alone (which cannot know
-  the words), and 46% of lip files made for another line. The directory grade adds the median closures per m, b and p,
-  with a warning outside 0.5 to 1.6 (Fallout 2's directories: 0.75 to 1.50).
+  more than half the loud speech is an error. Warnings: a mouth that follows the sound clearly better 150 to 300 ms off
+  (on lines of 2 s or more), or by a wider margin 310 to 600 ms off (3 s or more), naming the offset; a mouth open
+  through more than half the quiet away from speech; a mouth changing shape under once or over 20 times a second of
+  speech. A directory of 15 or more lip files gets a grade, the medians of its files' figures: alignment (the chance
+  that an open-mouth frame of speech is louder than a shut one: 0.5 is chance), width (the rank correlation of how wide
+  the mouth opens with the loudness: 0 is chance), the shares of the loud speech shown shut and of the quiet shown open,
+  and shape changes a second. It warns below 0.6 alignment or 0.16 width, above 35% shut or 25% open, or outside 4 to 12
+  changes. Fallout 2's own speech directories grade 0.64 to 0.82, 0.20 to 0.51, 6 to 25%, 0 to 6% and 6.1 to 9.1. How
+  wide each head frame opens is ranked by the loudness of the speech it shows in Fallout 2's own files. `info` shows
+  each file's figures, and judges no lip file made for another length.
+- **Against the words.** Given the lines' text (`check --msg dialog/` or `info --msg`, a dialog file or a directory of
+  them, English), `check` also counts the closed-lips shapes against each line's m, b and p, a run of them (the m b of
+  "remember") counted once: Interplay's files close the lips once for each. A lip file closing them under 0.67 or over
+  1.5 times as often, with under a quarter of the m, b and p met by a closure near where they fall, gets a warning. That
+  warns on 3% of Fallout 2's own files, 1% of `ipsdoc lip --msg`'s, 26% of `ipsdoc lip`'s from the sound alone (which
+  cannot know the words), and 41% of lip files made for another line. The directory grade adds the median closures per
+  m, b and p, with a warning outside 0.5 to 1.6 (Fallout 2's directories: 0.75 to 1.50).

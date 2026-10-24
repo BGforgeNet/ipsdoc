@@ -40,6 +40,10 @@ enum Command {
         /// Files to inspect.
         #[arg(required = true)]
         files: Vec<PathBuf>,
+        /// Dialog message files, or directories of them, giving each line's text: each lip file's closed lips are
+        /// then also shown against its line's words (English).
+        #[arg(long)]
+        msg: Vec<PathBuf>,
     },
     /// Decodes sounds and checks lip files (directories: every ACM, WAVC, RIFF, Ogg and lip file inside,
     /// recursively); fails on any that does not decode or check.
@@ -319,10 +323,10 @@ fn field_name(f: Field) -> &'static str {
     }
 }
 
-fn info(path: &Path) -> Result<(), Failure> {
+fn info(path: &Path, entries: Option<&[msg::Entry]>) -> Result<(), Failure> {
     let bytes = read_file(path)?;
     if lip::looks_like(&bytes) {
-        return lip_info(path, &bytes);
+        return lip_info(path, &bytes, entries);
     }
     let format = detect(&bytes);
     println!("{}: {}", path.display(), format.name());
@@ -516,12 +520,21 @@ fn check(paths: &[PathBuf], msgs: &[PathBuf]) -> Result<(), Failure> {
     for (dir, files) in &sets {
         let Some(g) = lipqual::grade(files) else { continue };
         let alignment = g.alignment.map_or("not judged".to_owned(), |a| format!("{a:.2}"));
-        let closures = g
-            .closures
-            .map_or(String::new(), |c| format!(", lips closed {c:.2} times per m, b and p"));
+        // Each further median, when enough files have it.
+        let figure =
+            |m: Option<f64>, show: &dyn Fn(f64) -> String| m.map_or(String::new(), |m| format!(", {}", show(m)));
+        let more = [
+            figure(g.openness, &|o| format!("width {o:.2}")),
+            figure(g.open_while_quiet, &|q| {
+                format!("mouth open through {:.0}% of the quiet", 100.0 * q)
+            }),
+            figure(g.movement, &|m| format!("{m:.1} shape changes a second")),
+            figure(g.closures, &|c| format!("lips closed {c:.2} times per m, b and p")),
+        ]
+        .concat();
         println!(
             "{}: lip sync of {} lip files (medians): alignment {alignment}, mouth shut through {:.0}% of the loud \
-             speech{closures}",
+             speech{more}",
             dir.display(),
             g.files,
             100.0 * g.shut
@@ -600,10 +613,12 @@ fn repair_files(files: &[PathBuf], dry_run: bool) -> Result<(), Failure> {
 }
 
 /// `info` for each file; a file that fails is reported and the rest still shown.
-fn info_files(files: &[PathBuf]) -> Result<(), Failure> {
+fn info_files(files: &[PathBuf], msgs: &[PathBuf]) -> Result<(), Failure> {
+    let entries = load_msgs(msgs)?;
+    let entries = (!msgs.is_empty()).then_some(entries.as_slice());
     let mut failed = 0;
     for f in files {
-        if let Err(Failure(_, message)) = info(f) {
+        if let Err(Failure(_, message)) = info(f, entries) {
             eprintln!("{message}");
             failed += 1;
         }
@@ -639,7 +654,7 @@ fn label(s: lip::Severity) -> &'static str {
     }
 }
 
-fn lip_info(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
+fn lip_info(path: &Path, bytes: &[u8], entries: Option<&[msg::Entry]>) -> Result<(), Failure> {
     println!("{}: lip", path.display());
     let l = Lip::parse(bytes).map_err(|e| fail(1, format!("{}: {e}", path.display())))?;
     println!(
@@ -655,24 +670,20 @@ fn lip_info(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
     match named_sound(path, &l) {
         Ok(Some((acm, audio))) => {
             let secs = audio.frames() as f64 / f64::from(audio.rate);
-            let fit = match lip::fit(l.last(), &audio) {
+            let fit = lip::fit(l.last(), &audio);
+            let fits = match fit {
                 lip::Fit::Matches => "fits it".to_owned(),
                 lip::Fit::Scaled(f) => format!("is {f}x its length"),
                 lip::Fit::Off { ms } => format!("ends {}", off_by(ms, "it")),
             };
-            println!("  sound {}: {secs:.3} s; the lip file {fit}", acm.display());
-            let q = lipqual::quality(&l, &audio, None);
-            match (q.alignment, q.shut_while_loud) {
-                (Some(a), Some(s)) => println!(
-                    "  sync: alignment {a:.2} (0.5 is chance), mouth shut through {:.0}% of the loud speech",
-                    100.0 * s
-                ),
-                _ => println!(
-                    "  sync: not judged (no speech, codes the game misreads, or a mouth that never opens or never \
-                     shuts in speech)"
-                ),
+            println!("  sound {}: {secs:.3} s; the lip file {fits}", acm.display());
+            if fit.for_this_sound() {
+                let q = lipqual::quality(&l, &audio, line_tokens(entries, &l).as_deref());
+                print_quality(&q);
+                problems.extend(q.problems().iter().map(|p| (label(p.severity()), p.to_string())));
+            } else {
+                println!("  sync: not judged (made for another length, so its shapes are placed by another sound)");
             }
-            problems.extend(q.problems().iter().map(|p| (label(p.severity()), p.to_string())));
         }
         Ok(None) => println!("  no sound {} beside it", l.name()),
         Err(e) => println!("  sound unreadable: {e}"),
@@ -684,6 +695,48 @@ fn lip_info(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
         println!("  {severity}: {p}");
     }
     Ok(())
+}
+
+/// `info`'s figures for how a lip file follows its sound.
+fn print_quality(q: &lipqual::Quality) {
+    match (q.alignment, q.shut_while_loud) {
+        (Some(a), Some(s)) => println!(
+            "  sync: alignment {a:.2} (0.5 is chance), mouth shut through {:.0}% of the loud speech",
+            100.0 * s
+        ),
+        _ => println!(
+            "  sync: not judged (no speech, codes the game misreads, or a mouth that never opens or never shuts in \
+             speech)"
+        ),
+    }
+    if let Some(o) = q.openness {
+        println!("  width: how wide the mouth opens follows the loudness at rank correlation {o:.2} (0 is chance)");
+    }
+    for (offset, band) in [(q.offset, "150 to 300"), (q.far_offset, "310 to 600")] {
+        if let Some((a, ms)) = offset {
+            let side = if ms < 0.0 { "early" } else { "late" };
+            println!(
+                "  offset: best alignment {band} ms off is {a:.2}, {:.0} ms {side}",
+                ms.abs()
+            );
+        }
+    }
+    if let Some(s) = q.open_while_quiet {
+        println!("  quiet: mouth open through {:.0}% of the quiet", 100.0 * s);
+    }
+    if let Some(m) = q.movement {
+        println!("  movement: {m:.1} shape changes a second of speech");
+    }
+    if let Some(t) = q.text {
+        println!("  words: {t}");
+    }
+}
+
+/// The words of the line a lip file names, from the dialog `entries`.
+fn line_tokens(entries: Option<&[msg::Entry]>, l: &Lip) -> Option<Vec<g2p::Token>> {
+    entries
+        .and_then(|e| msg::find(e, l.name().trim()))
+        .map(|f| g2p::tokens(&f.entry.text))
 }
 
 /// Checks a lip file on its own and against the sound beside it; reports and returns whether it passes, and how well
@@ -750,12 +803,8 @@ fn check_lip(
                 ok &= s != lip::Severity::Error;
             }
         }
-        // A lip file made for another length places its shapes by another sound: judging them here says nothing.
-        if fit.severity() != Some(lip::Severity::Error) {
-            let text = entries
-                .and_then(|e| msg::find(e, l.name().trim()))
-                .map(|f| g2p::tokens(&f.entry.text));
-            let q = lipqual::quality(&l, &audio, text.as_deref());
+        if fit.for_this_sound() {
+            let q = lipqual::quality(&l, &audio, line_tokens(entries, &l).as_deref());
             for p in q.problems() {
                 eprintln!("{}: {}: {p}", path.display(), label(p.severity()));
                 ok &= p.severity() != lip::Severity::Error;
@@ -876,7 +925,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match (&cli.command, &cli.convert) {
         (Some(Command::Convert(a)), _) | (None, Some(a)) => convert(a),
-        (Some(Command::Info { files }), _) => info_files(files),
+        (Some(Command::Info { files, msg }), _) => info_files(files, msg),
         (Some(Command::Check { paths, msg }), _) => check(paths, msg),
         (Some(Command::Repair { dry_run, files }), _) => repair_files(files, *dry_run),
         (Some(Command::Lip(a)), _) => lip_files(a),

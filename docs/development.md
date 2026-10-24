@@ -78,3 +78,11 @@ IPSDOC_LIPS=... IPSDOC_MSG=... IPSDOC_LIPS_WAV2LIP=... cargo test --release -p o
 `IPSDOC_LIPS_LIMIT=N` takes the first N lip files of each half, before the ones without a usable reference are skipped;
 the run passes only with 100 held-out lines scored. The table it prints is the one to tune `Params` by, on the tuning
 half only.
+
+`oracles/tests/lipqual.rs`, on the same inputs, measures `check`'s lip-sync limits: how often each problem is reported
+on Fallout 2's own files, ours, wav2lip's and spoiled copies of the originals (another line's, moved late, shuffled, one
+shape held), and how each set's directories grade. The figures in `src/lipqual.rs` come from its report.
+
+```sh
+IPSDOC_LIPS=... IPSDOC_MSG=... IPSDOC_LIPS_WAV2LIP=... cargo test --release -p oracles --test lipqual -- --ignored --nocapture
+```

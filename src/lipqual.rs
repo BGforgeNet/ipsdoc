@@ -1,9 +1,9 @@
 //! How well a lip file follows its sound: whether the mouth opens while the line is loud, at what offset it follows
 //! the loudness best, and, given the line's text, whether the lips close for its m, b and p.
 //!
-//! The limits come from Fallout 2's 994 voiced lines whose lip file ends with its sound, against their own lip files
-//! (Interplay's), ours from the sound alone, wav2lip's, another line's lip file stretched to fit, and the original
-//! moved 200 ms late; the text from the Unofficial Patch's English dialog.
+//! The limits come from Fallout 2's 993 voiced lines whose lip file ends with its sound, against their own lip files
+//! (Interplay's), ours, wav2lip's, and spoiled copies of the originals; the text from the Unofficial Patch's English
+//! dialog. `oracles/tests/lipqual.rs` measures every figure quoted here.
 
 use std::fmt;
 
@@ -19,34 +19,68 @@ const LOUD_DB: f32 = 15.0;
 const SHUT_LIMIT: f64 = 0.5;
 /// Offsets up to this many 10 ms frames go unseen (see [`crate::lip::Fit`]), so alignment is the best within them.
 const UNSEEN_FRAMES: i32 = 5;
-/// From this many frames an offset is seen; offsets are looked for up to [`MAX_FRAMES`].
+/// From this many frames an offset is seen; offsets are looked for up to [`OFFSET_FRAMES`], and far ones beyond.
 const SEEN_FRAMES: i32 = 15;
-/// The longest offset looked for: 300 ms.
-const MAX_FRAMES: i32 = 30;
+/// The longest offset looked for under the plain limits: 300 ms.
+const OFFSET_FRAMES: i32 = 30;
+/// The longest far offset looked for: 600 ms. Looking to 1 s under the plain limits flagged 11% of Interplay's files,
+/// half of them chance alignments past 600 ms; a file that far off shows as open while quiet, its directory unaligned.
+const MAX_FRAMES: i32 = 60;
+/// Frames this close to speech are not quiet: a shape is held into a pause, and opens ahead of the voice.
+const QUIET_MARGIN: usize = 15;
+/// A sound with fewer quiet frames than this has no quiet to judge.
+const QUIET_MIN: usize = 20;
+/// A mouth open through more of the quiet frames than this is a warning: on 5% of Interplay's files with quiet to
+/// judge, none of ours or wav2lip's, three quarters of the originals moved 500 ms late or shuffled, and every file
+/// holding one open shape.
+const OPEN_QUIET_LIMIT: f64 = 0.5;
+/// Speech shorter than this (frames) has too few shapes for a rate.
+const MOVEMENT_MIN_FRAMES: usize = 100;
+/// Shape changes per second of speech outside these are a warning, a mouth that hardly moves or one that jitters:
+/// Interplay's files range 1.9 to 14.7, wav2lip's 0.5 to 38.
+const MOVEMENT: (f64, f64) = (1.0, 20.0);
+/// Head frames 0 to 8 ranked by the median loudness rank of the speech frames showing them in Interplay's files
+/// (rest 0.14, then frame 4, closed lips 0.43, 2, 5, 3, 8, 1, and 7 at 0.71): how wide each opens, as voiced.
+const OPENNESS: [u8; 9] = [0, 7, 3, 5, 1, 4, 2, 8, 6];
 /// A line this long or longer (seconds) has enough speech to show an offset: about a quarter of Interplay's shorter
 /// lines align as well somewhere off by chance.
 const OFFSET_MIN_SECONDS: f64 = 2.0;
 /// An offset is reported when the mouth aligns this well there ...
 const OFFSET_ALIGNMENT: f64 = 0.7;
-/// ... and this much better than within the unseen offsets. It flags 4% of Interplay's lines (some of them truly
-/// 150 to 300 ms off), 0.7% of ours, and half of the originals moved 200 ms late.
+/// ... and this much better than within the unseen offsets. It flags 3.5% of Interplay's lines (some of them
+/// truly 150 to 300 ms off), 1% of ours from the sound and 8% from the text, and half of the originals moved 200 ms
+/// late.
 const OFFSET_GAIN: f64 = 0.15;
+/// A far offset needs a line this long (seconds) ...
+const FAR_OFFSET_MIN_SECONDS: f64 = 3.0;
+/// ... and this gain, as more offsets are tried there: that adds 1.2% of Interplay's lines, and 37% of the originals
+/// moved 500 ms late.
+const FAR_OFFSET_GAIN: f64 = 0.25;
 /// A directory of at least this many lip files is graded as a set, where chance evens out ...
 const SET_MIN: usize = 15;
 /// ... and warned about below this median alignment: Fallout 2's 11 speech directories have 0.64 to 0.82, speakers'
 /// sets of other lines' lip files 0.53 to 0.59 ...
 const SET_ALIGNMENT: f64 = 0.6;
 /// ... or above this median share of the loud speech shown shut: Fallout 2's directories have 0.06 to 0.25, ours
-/// 0.06 to 0.08 per speaker, wav2lip's 0.77 to 0.92 ...
+/// 0.01 to 0.06 per speaker, wav2lip's 0.78 to 0.90 ...
 const SET_SHUT: f64 = 0.35;
 /// ... or with a median of closures per m, b and p outside these: Fallout 2's directories have 0.75 to 1.50,
-/// wav2lip's 0 (it never closes the lips).
+/// wav2lip's 0 (it never closes the lips) ...
 const SET_CLOSURES: (f64, f64) = (0.5, 1.6);
+/// ... or below this median openness: Fallout 2's directories have 0.20 to 0.51, ours 0.39 to 0.68, wav2lip's 0.21
+/// to 0.31, other lines' lip files and the originals moved or shuffled 0.12 at most ...
+const SET_OPENNESS: f64 = 0.16;
+/// ... or above this median share of the quiet shown open: Fallout 2's directories have 0 to 0.06, other lines' lip
+/// files and the originals moved 500 ms late or shuffled 0.42 and more ...
+const SET_OPEN_QUIET: f64 = 0.25;
+/// ... or with a median of shape changes a second of speech outside these: Fallout 2's directories have 6.1 to 9.1,
+/// wav2lip's 2.0 to 15.5.
+const SET_MOVEMENT: (f64, f64) = (4.0, 12.0);
 /// Interplay's lip files close the lips once per m, b or p of the text (the middle half of them exactly once); a
 /// lip file closing them at a ratio outside these ...
 const CLOSURES: (f64, f64) = (0.67, 1.5);
 /// ... with under this share of the m, b and p met by a closure nearby, misses the words: Interplay's 3%, ours from
-/// the text 2%, from the sound alone 28% (it cannot know them), another line's lip file stretched to fit 46%,
+/// the text 1%, from the sound alone 26% (it cannot know them), another line's lip file stretched to fit 41%,
 /// wav2lip's all.
 const PLACED: f64 = 0.25;
 /// A closure meets an m, b or p within this many frames of where the sound falls with the line's phones spread
@@ -71,6 +105,16 @@ impl TextFit {
     }
 }
 
+impl fmt::Display for TextFit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "the lips close {} times for the line's {} m, b and p, {} of them nearby",
+            self.closures, self.bilabials, self.placed
+        )
+    }
+}
+
 /// How a lip file follows its sound.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Quality {
@@ -80,8 +124,18 @@ pub struct Quality {
     /// mouth that opens exactly with the loudness. The best within the offsets no player sees. `None` when the mouth
     /// is never open, or never shut, in speech.
     pub alignment: Option<f64>,
+    /// Rank correlation of how wide the mouth opens (head frames ranked by the loudness they show in Interplay's
+    /// files) with the loudness, over speech: 0 is chance. The best within the offsets no player sees. `None` when the
+    /// mouth shows one width all through the speech.
+    pub openness: Option<f64>,
     /// The best alignment 150 to 300 ms off, and that offset in milliseconds (positive: the mouth runs late).
     pub offset: Option<(f64, f64)>,
+    /// The same 310 to 600 ms off.
+    pub far_offset: Option<(f64, f64)>,
+    /// Share of the quiet frames, away from speech, that show an open mouth; `None` for a sound with little quiet.
+    pub open_while_quiet: Option<f64>,
+    /// Shape changes per second of speech; `None` for a sound with little speech.
+    pub movement: Option<f64>,
     /// The sound's length in seconds.
     pub seconds: f64,
     /// How the closed lips fit the line's text, when it was given.
@@ -103,6 +157,16 @@ pub enum QualityProblem {
     },
     /// The lips close neither as often as the text has m, b and p, nor where they fall.
     Closures(TextFit),
+    /// The mouth stays open through this share of the quiet.
+    OpenWhileQuiet {
+        /// The share.
+        share: f64,
+    },
+    /// The mouth changes shape this many times a second of speech: too seldom, or too often.
+    Movement {
+        /// Changes a second.
+        rate: f64,
+    },
 }
 
 impl QualityProblem {
@@ -110,7 +174,10 @@ impl QualityProblem {
     pub fn severity(&self) -> Severity {
         match self {
             QualityProblem::Shut { .. } => Severity::Error,
-            QualityProblem::Offset { .. } | QualityProblem::Closures(_) => Severity::Warning,
+            QualityProblem::Offset { .. }
+            | QualityProblem::Closures(_)
+            | QualityProblem::OpenWhileQuiet { .. }
+            | QualityProblem::Movement { .. } => Severity::Warning,
         }
     }
 }
@@ -129,11 +196,14 @@ impl fmt::Display for QualityProblem {
                     ms.abs()
                 )
             }
-            QualityProblem::Closures(t) => write!(
-                f,
-                "the lips close {} times for the line's {} m, b and p, {} of them nearby",
-                t.closures, t.bilabials, t.placed
-            ),
+            QualityProblem::Closures(t) => t.fmt(f),
+            QualityProblem::OpenWhileQuiet { share } => {
+                write!(f, "the mouth is open through {:.0}% of the quiet", 100.0 * share)
+            }
+            QualityProblem::Movement { rate } => {
+                let how = if *rate < MOVEMENT.0 { "hardly moves" } else { "jitters" };
+                write!(f, "the mouth {how}: {rate:.1} shape changes a second of speech")
+            }
         }
     }
 }
@@ -147,10 +217,16 @@ impl Quality {
         {
             out.push(QualityProblem::Shut { share });
         }
-        if let (Some(near), Some((far, ms))) = (self.alignment, self.offset)
-            && self.seconds >= OFFSET_MIN_SECONDS
-            && far >= OFFSET_ALIGNMENT
-            && far - near >= OFFSET_GAIN
+        let found = |offset, min_seconds, gain| match (self.alignment, offset) {
+            (Some(near), Some((far, ms)))
+                if self.seconds >= min_seconds && far >= OFFSET_ALIGNMENT && far - near >= gain =>
+            {
+                Some(ms)
+            }
+            _ => None,
+        };
+        if let Some(ms) = found(self.offset, OFFSET_MIN_SECONDS, OFFSET_GAIN)
+            .or_else(|| found(self.far_offset, FAR_OFFSET_MIN_SECONDS, FAR_OFFSET_GAIN))
         {
             out.push(QualityProblem::Offset { ms });
         }
@@ -160,6 +236,16 @@ impl Quality {
             && (t.placed as f64) < PLACED * t.bilabials as f64
         {
             out.push(QualityProblem::Closures(t));
+        }
+        if let Some(share) = self.open_while_quiet
+            && share > OPEN_QUIET_LIMIT
+        {
+            out.push(QualityProblem::OpenWhileQuiet { share });
+        }
+        if let Some(rate) = self.movement
+            && !(MOVEMENT.0..=MOVEMENT.1).contains(&rate)
+        {
+            out.push(QualityProblem::Movement { rate });
         }
         out
     }
@@ -176,6 +262,12 @@ pub struct SetGrade {
     pub shut: f64,
     /// Their median [`TextFit::ratio`], when enough of them have text with m, b or p.
     pub closures: Option<f64>,
+    /// Their median [`Quality::openness`], when enough of them have one.
+    pub openness: Option<f64>,
+    /// Their median [`Quality::open_while_quiet`], when enough of them have one.
+    pub open_while_quiet: Option<f64>,
+    /// Their median [`Quality::movement`], when enough of them have one.
+    pub movement: Option<f64>,
 }
 
 /// A way a set of lip files fails its sounds.
@@ -187,6 +279,12 @@ pub enum SetProblem {
     Shut(f64),
     /// The lips close this many times per m, b and p of the text (median).
     Closures(f64),
+    /// How wide the mouths open follows the loudness little better than chance: median rank correlation this.
+    Openness(f64),
+    /// The mouths stay open through this median share of the quiet.
+    OpenWhileQuiet(f64),
+    /// The mouths change shape this many times a second of speech (median).
+    Movement(f64),
 }
 
 impl fmt::Display for SetProblem {
@@ -207,20 +305,42 @@ impl fmt::Display for SetProblem {
                 "its lip files close the lips {m:.2} times per m, b and p of their lines (median), outside {} to {}",
                 SET_CLOSURES.0, SET_CLOSURES.1
             ),
+            SetProblem::Openness(m) => write!(
+                f,
+                "how wide its lip files open the mouth follows their sounds poorly: median rank correlation {m:.2}, \
+                 under {SET_OPENNESS}"
+            ),
+            SetProblem::OpenWhileQuiet(m) => write!(
+                f,
+                "its lip files keep the mouth open through {:.0}% of the quiet (median), over {:.0}%",
+                100.0 * m,
+                100.0 * SET_OPEN_QUIET
+            ),
+            SetProblem::Movement(m) => write!(
+                f,
+                "its lip files change the mouth's shape {m:.1} times a second of speech (median), outside {} to {}",
+                SET_MOVEMENT.0, SET_MOVEMENT.1
+            ),
         }
     }
 }
 
 /// Grades a directory's lip files, when there are enough of them for chance to even out.
 pub fn grade(files: &[Quality]) -> Option<SetGrade> {
-    let alignments: Vec<f64> = files.iter().filter_map(|q| q.alignment).collect();
     let shut: Vec<f64> = files.iter().filter_map(|q| q.shut_while_loud).collect();
-    let ratios: Vec<f64> = files.iter().filter_map(|q| q.text?.ratio()).collect();
+    // The median of a figure, when enough of the files have it.
+    let of = |figure: &dyn Fn(&Quality) -> Option<f64>| {
+        let v: Vec<f64> = files.iter().filter_map(figure).collect();
+        (v.len() >= SET_MIN).then(|| median(&v))
+    };
     (shut.len() >= SET_MIN).then(|| SetGrade {
         files: shut.len(),
-        alignment: (alignments.len() >= SET_MIN).then(|| median(&alignments)),
+        alignment: of(&|q| q.alignment),
         shut: median(&shut),
-        closures: (ratios.len() >= SET_MIN).then(|| median(&ratios)),
+        closures: of(&|q| q.text?.ratio()),
+        openness: of(&|q| q.openness),
+        open_while_quiet: of(&|q| q.open_while_quiet),
+        movement: of(&|q| q.movement),
     })
 }
 
@@ -240,6 +360,21 @@ impl SetGrade {
             && !(SET_CLOSURES.0..=SET_CLOSURES.1).contains(&c)
         {
             out.push(SetProblem::Closures(c));
+        }
+        if let Some(o) = self.openness
+            && o < SET_OPENNESS
+        {
+            out.push(SetProblem::Openness(o));
+        }
+        if let Some(o) = self.open_while_quiet
+            && o > SET_OPEN_QUIET
+        {
+            out.push(SetProblem::OpenWhileQuiet(o));
+        }
+        if let Some(m) = self.movement
+            && !(SET_MOVEMENT.0..=SET_MOVEMENT.1).contains(&m)
+        {
+            out.push(SetProblem::Movement(m));
         }
         out
     }
@@ -291,7 +426,11 @@ pub fn quality(l: &Lip, audio: &Audio, text: Option<&[Token]>) -> Quality {
         return Quality {
             shut_while_loud: None,
             alignment: None,
+            openness: None,
             offset: None,
+            far_offset: None,
+            open_while_quiet: None,
+            movement: None,
             seconds,
             text: None,
         };
@@ -306,35 +445,113 @@ pub fn quality(l: &Lip, audio: &Audio, text: Option<&[Token]>) -> Quality {
     let p95 = sorted[((n - 1) as f64 * 0.95).round() as usize];
     let loud: Vec<usize> = (0..n).filter(|&i| db[i] >= p95 - LOUD_DB).collect();
     let shut = loud.iter().filter(|&&i| !open(shown[i])).count();
-    let (mut near, mut far) = (None::<f64>, None::<(f64, f64)>);
+    let (mut near, mut openness) = (None::<f64>, None::<f64>);
+    let (mut offset, mut far_offset) = (None::<(f64, f64)>, None::<(f64, f64)>);
     for lag in -MAX_FRAMES..=MAX_FRAMES {
+        if lag.abs() <= UNSEEN_FRAMES
+            && let Some(r) = width_correlation(&shown, &db, &speaking, lag)
+        {
+            openness = Some(openness.map_or(r, |b| b.max(r)));
+        }
         let Some(a) = alignment(&shown, &db, &speaking, lag) else {
             continue;
         };
-        if lag.abs() <= UNSEEN_FRAMES {
-            near = Some(near.map_or(a, |b| b.max(a)));
-        }
-        if lag.abs() >= SEEN_FRAMES && far.is_none_or(|(b, _)| a > b) {
-            far = Some((a, f64::from(lag * 10)));
+        let best = match lag.abs() {
+            l if l <= UNSEEN_FRAMES => {
+                near = Some(near.map_or(a, |b| b.max(a)));
+                continue;
+            }
+            l if l < SEEN_FRAMES => continue,
+            l if l <= OFFSET_FRAMES => &mut offset,
+            _ => &mut far_offset,
+        };
+        if best.is_none_or(|(b, _)| a > b) {
+            *best = Some((a, f64::from(lag * 10)));
         }
     }
     let span = (
         analysis.segments.first().map_or(0, |s| s.start),
         analysis.segments.last().map_or(0, |s| s.end.min(n)),
     );
+    let quiet = quiet_frames(&speaking);
+    let open_quiet = quiet.iter().filter(|&&i| open(shown[i])).count();
+    let speech_frames = speaking.iter().filter(|&&s| s).count();
+    let changes = (1..n).filter(|&i| speaking[i] && shown[i] != shown[i - 1]).count();
     Quality {
         shut_while_loud: (!loud.is_empty()).then(|| shut as f64 / loud.len() as f64),
         alignment: near,
-        offset: far,
+        openness,
+        offset,
+        far_offset,
+        open_while_quiet: (quiet.len() >= QUIET_MIN).then(|| open_quiet as f64 / quiet.len() as f64),
+        movement: (speech_frames >= MOVEMENT_MIN_FRAMES)
+            .then(|| changes as f64 * f64::from(speech::FRAMES_PER_SECOND) / speech_frames as f64),
         seconds,
         text: text.map(|t| text_fit(&shown, &speaking, span, t)),
     }
 }
 
+/// The frames more than [`QUIET_MARGIN`] frames from any speech.
+fn quiet_frames(speaking: &[bool]) -> Vec<usize> {
+    let n = speaking.len();
+    (0..n)
+        .filter(|&i| !speaking[i.saturating_sub(QUIET_MARGIN)..(i + QUIET_MARGIN + 1).min(n)].contains(&true))
+        .collect()
+}
+
+/// Spearman's rank correlation of how wide the mouth opens `lag` frames later ([`OPENNESS`]) with the loudness, over
+/// the speech frames; `None` when either is constant.
+fn width_correlation(shown: &[u8], db: &[f32], speaking: &[bool], lag: i32) -> Option<f64> {
+    let (mut width, mut loudness) = (Vec::new(), Vec::new());
+    for (i, &d) in db.iter().enumerate() {
+        let Some(j) = i.checked_add_signed(lag as isize).filter(|&j| j < shown.len()) else {
+            continue;
+        };
+        if speaking[i] {
+            width.push(f64::from(OPENNESS[usize::from(shown[j])]));
+            loudness.push(f64::from(d));
+        }
+    }
+    pearson(&ranks(&width), &ranks(&loudness))
+}
+
+/// Each value's rank from 1, ties sharing their mean rank.
+fn ranks(v: &[f64]) -> Vec<f64> {
+    let mut order: Vec<usize> = (0..v.len()).collect();
+    order.sort_by(|&a, &b| v[a].total_cmp(&v[b]));
+    let mut out = vec![0.0; v.len()];
+    let mut i = 0;
+    while i < order.len() {
+        let j = i + order[i..]
+            .iter()
+            .take_while(|&&k| v[k].total_cmp(&v[order[i]]).is_eq())
+            .count();
+        let rank = (i + j + 1) as f64 / 2.0;
+        for &k in &order[i..j] {
+            out[k] = rank;
+        }
+        i = j;
+    }
+    out
+}
+
+/// Pearson's correlation; `None` when either series is constant.
+fn pearson(x: &[f64], y: &[f64]) -> Option<f64> {
+    let n = x.len() as f64;
+    let (mx, my) = (x.iter().sum::<f64>() / n, y.iter().sum::<f64>() / n);
+    let (mut sxy, mut sxx, mut syy) = (0.0, 0.0, 0.0);
+    for (a, b) in x.iter().zip(y) {
+        sxy += (a - mx) * (b - my);
+        sxx += (a - mx) * (a - mx);
+        syy += (b - my) * (b - my);
+    }
+    (sxx > 0.0 && syy > 0.0).then(|| sxy / (sxx * syy).sqrt())
+}
+
 /// Closed-lips shapes ([`CLOSED`]) in or within 50 ms of speech, against the text's m, b and p, each placed where
 /// it falls with the line's phones spread evenly over `span`, the frames from the first speech to the last. A run of
 /// them (the m b of "remember", the m b of "come back") is one closure, as the lips close once for it; a phrase
-/// break ends a run.
+/// break ends a run. Not placed by `lipgen`'s alignment, which would let our generator judge its own files.
 fn text_fit(shown: &[u8], speaking: &[bool], span: (usize, usize), text: &[Token]) -> TextFit {
     let n = shown.len();
     let mut closures = Vec::new();
@@ -495,6 +712,7 @@ mod tests {
         let q = quality(&generate("x", &audio, None, &Params::default()), &audio, None);
         assert!(q.shut_while_loud.unwrap() < 0.2, "{q:?}");
         assert!(q.alignment.unwrap() > SET_ALIGNMENT, "{q:?}");
+        assert!(q.openness.unwrap() > SET_OPENNESS, "{q:?}");
         assert_eq!(q.problems(), []);
     }
 
@@ -502,7 +720,14 @@ mod tests {
     fn a_mouth_shut_through_the_speech_is_an_error() {
         let audio = speech();
         let q = quality(&whole(0, &audio), &audio, None);
-        assert_eq!(q.problems(), [QualityProblem::Shut { share: 1.0 }]);
+        // A mouth that never opens does not move either.
+        assert_eq!(
+            q.problems(),
+            [
+                QualityProblem::Shut { share: 1.0 },
+                QualityProblem::Movement { rate: 0.0 }
+            ]
+        );
         assert_eq!(q.problems()[0].severity(), Severity::Error);
     }
 
@@ -522,6 +747,61 @@ mod tests {
         let at = |seconds| Quality { seconds, ..q };
         assert_eq!(at(OFFSET_MIN_SECONDS).problems(), q.problems());
         assert_eq!(at(OFFSET_MIN_SECONDS - 0.1).problems(), []);
+    }
+
+    #[test]
+    fn a_mouth_held_open_from_start_to_end_is_warned_about() {
+        let audio = speech();
+        let q = quality(&whole(1, &audio), &audio, None);
+        // Never shut in speech, so neither alignment nor width says anything: the quiet and the stillness do.
+        assert_eq!((q.alignment, q.openness), (None, None));
+        assert_eq!(
+            q.problems(),
+            [
+                QualityProblem::OpenWhileQuiet { share: 1.0 },
+                QualityProblem::Movement { rate: 0.0 }
+            ]
+        );
+    }
+
+    #[test]
+    fn a_mouth_changing_shape_every_frame_jitters() {
+        let audio = speech();
+        let last = 2 * audio.len() as i32;
+        // A new shape every 10 ms (221 samples), open and wide by turns.
+        let positions: Vec<i32> = (0..)
+            .map(|i| i * 2 * 221)
+            .take_while(|&p| p < last)
+            .chain([last])
+            .collect();
+        let codes = (0..positions.len() - 1)
+            .map(|i| if i % 2 == 0 { 1 } else { 2 })
+            .collect();
+        let markers = positions
+            .into_iter()
+            .map(|position| Marker { kind: 1, position })
+            .collect();
+        let q = quality(&Lip::new("x", codes, markers), &audio, None);
+        assert!(
+            q.problems()
+                .iter()
+                .any(|p| matches!(p, QualityProblem::Movement { rate } if *rate > MOVEMENT.1)),
+            "{q:?}"
+        );
+    }
+
+    #[test]
+    fn quiet_frames_keep_their_distance_from_speech() {
+        let speaking: Vec<bool> = [vec![false; 20], vec![true; 5], vec![false; 40]].concat();
+        let want: Vec<usize> = (0..5).chain(40..65).collect();
+        assert_eq!(quiet_frames(&speaking), want);
+    }
+
+    #[test]
+    fn ranks_share_ties_and_a_constant_series_has_no_correlation() {
+        assert_eq!(ranks(&[3.0, 1.0, 3.0, 2.0]), [3.5, 1.0, 3.5, 2.0]);
+        assert_eq!(pearson(&[1.0, 2.0, 3.0], &[2.0, 4.0, 6.0]), Some(1.0));
+        assert_eq!(pearson(&[1.0, 1.0, 1.0], &[1.0, 2.0, 3.0]), None);
     }
 
     #[test]
@@ -578,7 +858,11 @@ mod tests {
         let file = |alignment, shut| Quality {
             shut_while_loud: Some(shut),
             alignment: Some(alignment),
+            openness: None,
             offset: None,
+            far_offset: None,
+            open_while_quiet: None,
+            movement: None,
             seconds: 3.0,
             text: None,
         };
@@ -612,5 +896,28 @@ mod tests {
             grade(&vec![closing(0); SET_MIN]).unwrap().problems(),
             [SetProblem::Closures(0.0)]
         );
+        // Width, quiet and movement: graded by their medians once enough files have them.
+        let moving = |openness, quiet, movement| Quality {
+            openness: Some(openness),
+            open_while_quiet: Some(quiet),
+            movement: Some(movement),
+            ..file(0.75, 0.1)
+        };
+        let g = grade(&vec![moving(0.5, 0.0, 7.0); SET_MIN]).unwrap();
+        assert_eq!(
+            (g.openness, g.open_while_quiet, g.movement, g.problems()),
+            (Some(0.5), Some(0.0), Some(7.0), vec![])
+        );
+        assert_eq!(
+            grade(&vec![moving(0.0, 1.0, 0.0); SET_MIN]).unwrap().problems(),
+            [
+                SetProblem::Openness(0.0),
+                SetProblem::OpenWhileQuiet(1.0),
+                SetProblem::Movement(0.0)
+            ]
+        );
+        let mut few = vec![moving(0.0, 1.0, 0.0); SET_MIN - 1];
+        few.push(file(0.75, 0.1));
+        assert_eq!(grade(&few).unwrap().problems(), []);
     }
 }

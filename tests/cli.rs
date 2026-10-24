@@ -680,9 +680,31 @@ fn check_grades_how_lip_files_follow_their_sounds() {
         text.contains(": lip sync of 15 lip files (medians): alignment 0."),
         "{text}"
     );
+    assert!(
+        text.contains("% of the loud speech, width 0.") && text.contains(", mouth open through 0% of the quiet, "),
+        "{text}"
+    );
     assert_eq!(String::from_utf8_lossy(&out.stderr), "");
     let info = ok(&ipsdoc(&["info", s(&d.path("x00.lip"))]));
     assert!(info.contains("  sync: alignment 0."), "{info}");
+    assert!(
+        info.contains("\n  width: how wide the mouth opens follows the loudness at rank correlation 0."),
+        "{info}"
+    );
+    assert!(
+        info.contains("\n  quiet: mouth open through 0% of the quiet\n"),
+        "{info}"
+    );
+    assert!(info.contains("\n  movement: "), "{info}");
+    assert!(
+        info.contains("\n  offset: best alignment 150 to 300 ms off is 0."),
+        "{info}"
+    );
+    assert!(
+        info.contains("\n  offset: best alignment 310 to 600 ms off is 0."),
+        "{info}"
+    );
+    assert!(!info.contains("words:"), "no text was given: {info}");
     // A mouth that never opens: an error for each, and the set warned about.
     for s in &sounds {
         let last = 2 * 3 * 22050;
@@ -728,6 +750,12 @@ fn check_grades_how_lip_files_follow_their_sounds() {
         "{}",
         all_output(&out)
     );
+    // `info` shows the same count beside its figures.
+    let info = ok(&ipsdoc(&["info", "--msg", s(&d.path("dialog")), s(&d.path("x00.lip"))]));
+    assert!(
+        info.contains("  words: the lips close 0 times for the line's 4 m, b and p, 0 of them nearby\n"),
+        "{info}"
+    );
     let out = ipsdoc(&["check", "--msg", s(&d.path("none.msg")), s(&d.path("x00.lip"))]);
     assert_eq!(out.status.code(), Some(1), "{}", all_output(&out));
 }
@@ -752,6 +780,16 @@ fn check_compares_a_lip_with_its_sound() {
         "{}",
         all_output(&out)
     );
+    // Its shapes are placed by another sound: `info` judges them no more than `check` does.
+    let info = ok(&ipsdoc(&["info", s(&lip)]));
+    assert!(
+        info.contains(
+            "the lip file is 2x its length\n  sync: not judged (made for another length, so its shapes are placed by \
+             another sound)\n"
+        ),
+        "{info}"
+    );
+    assert!(!info.contains("alignment"), "{info}");
     // Ending `ms` off the 1 s sound, at 44.1 bytes a millisecond.
     let off = |ms: i32| {
         let mut l = good.clone();

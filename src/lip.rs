@@ -217,6 +217,12 @@ impl Fit {
             Fit::Off { .. } => Some(Severity::Error),
         }
     }
+
+    /// Whether the lip file places its shapes by this sound, so that judging them against it means something: not
+    /// when it was made for another length.
+    pub fn for_this_sound(&self) -> bool {
+        self.severity() != Some(Severity::Error)
+    }
 }
 
 /// How `last` (a lip file's last marker) fits `sound`: within 0.01% or 2 bytes, whichever is more (resampling
