@@ -14,6 +14,8 @@ publish = false
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
+# A module that needs `unsafe` says so with `#![expect(unsafe_code, reason = "...")]`.
+unsafe_code = "deny"
 missing_debug_implementations = "warn"
 
 [workspace.lints.clippy]
@@ -42,6 +44,9 @@ needless_range_loop = "warn"
 wildcard_enum_match_arm = "warn"
 from_over_into = "warn"
 derive_partial_eq_without_eq = "warn"
+non_std_lazy_statics = "warn"
+# An ignored test says why, so a skip is tracked.
+ignore_without_reason = "warn"
 
 [package]
 name = "ipsdoc"
