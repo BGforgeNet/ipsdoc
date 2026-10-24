@@ -411,19 +411,14 @@ fn files_under(path: &Path, walked: &mut HashSet<PathBuf>, out: &mut Vec<PathBuf
     }
 }
 
-/// The whole file, or `None` when its head shows neither a sound nor a lip file: a game directory holds archives of
-/// hundreds of megabytes, which are not read past their head.
-fn read_if_sound(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
-    let mut f = std::fs::File::open(path)?;
+/// A file's head, enough to tell a sound or a lip file by: a game directory holds archives of hundreds of megabytes,
+/// which are not read past it.
+fn read_head(path: &Path) -> std::io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
-    (&mut f)
+    std::fs::File::open(path)?
         .take(detect::HEAD_LEN.max(lip::HEADER_LEN) as u64)
         .read_to_end(&mut bytes)?;
-    if detect(&bytes) == Format::Other && !lip::looks_like(&bytes) {
-        return Ok(None);
-    }
-    f.read_to_end(&mut bytes)?;
-    Ok(Some(bytes))
+    Ok(bytes)
 }
 
 /// The entries of the message files `paths` names, a directory standing for the `.msg` files in it.
@@ -454,6 +449,8 @@ fn check(paths: &[PathBuf], msgs: &[PathBuf]) -> Result<(), Failure> {
     let (mut checked, mut lips, mut failed) = (0u64, 0u64, 0u64);
     // Alignment per directory: a set of lip files is graded together, where chance evens out.
     let mut sets: BTreeMap<PathBuf, Vec<lipqual::Quality>> = BTreeMap::new();
+    // The sounds lip files named and that decoded: checking them again as sounds would decode them twice.
+    let mut decoded = HashSet::new();
     for p in paths {
         let explicit = !p.is_dir();
         let (mut files, mut errors) = (Vec::new(), Vec::new());
@@ -462,34 +459,53 @@ fn check(paths: &[PathBuf], msgs: &[PathBuf]) -> Result<(), Failure> {
             eprintln!("{e}");
         }
         failed += errors.len() as u64;
+        // Lip files first, each with the sound it names; then the sounds.
+        let mut sounds = Vec::new();
         for f in files {
-            // Inside a directory only sounds and lip files are checked; a file named outright is checked whatever
-            // it is.
-            let read = if explicit {
-                std::fs::read(&f).map(Some)
-            } else {
-                read_if_sound(&f)
-            };
-            let bytes = match read {
-                Ok(Some(b)) => b,
-                Ok(None) => continue,
+            let head = match read_head(&f) {
+                Ok(h) => h,
                 Err(e) => {
                     eprintln!("{}: {e}", f.display());
                     failed += 1;
                     continue;
                 }
             };
-            if lip::looks_like(&bytes) {
-                lips += 1;
-                let (ok, quality) = check_lip(&f, &bytes, entries);
-                failed += u64::from(!ok);
-                if let Some(q) = quality {
-                    sets.entry(f.parent().unwrap_or(Path::new("")).to_path_buf())
-                        .or_default()
-                        .push(q);
+            if !lip::looks_like(&head) {
+                // Inside a directory only sounds and lip files are checked; a file named outright is checked
+                // whatever it is.
+                if explicit || detect(&head) != Format::Other {
+                    sounds.push(f);
                 }
                 continue;
             }
+            lips += 1;
+            let (ok, quality) = match std::fs::read(&f) {
+                Ok(bytes) => check_lip(&f, &bytes, entries, &mut decoded),
+                Err(e) => {
+                    eprintln!("{}: {e}", f.display());
+                    (false, None)
+                }
+            };
+            failed += u64::from(!ok);
+            if let Some(q) = quality {
+                sets.entry(f.parent().unwrap_or(Path::new("")).to_path_buf())
+                    .or_default()
+                    .push(q);
+            }
+        }
+        for f in sounds {
+            if decoded.contains(&f) {
+                checked += 1;
+                continue;
+            }
+            let bytes = match std::fs::read(&f) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("{}: {e}", f.display());
+                    failed += 1;
+                    continue;
+                }
+            };
             checked += 1;
             if let Err(e) = input::read(&bytes, &ReadOptions::default()) {
                 eprintln!("{}: {}", f.display(), chain(&e));
@@ -672,8 +688,13 @@ fn lip_info(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
 
 /// Checks a lip file on its own and against the sound beside it; reports and returns whether it passes, and how well
 /// it follows the sound when that was judged. With `entries`, the line's text is looked up by the sound the lip file
-/// names.
-fn check_lip(path: &Path, bytes: &[u8], entries: Option<&[msg::Entry]>) -> (bool, Option<lipqual::Quality>) {
+/// names. A sound that decodes goes into `decoded`.
+fn check_lip(
+    path: &Path,
+    bytes: &[u8],
+    entries: Option<&[msg::Entry]>,
+    decoded: &mut HashSet<PathBuf>,
+) -> (bool, Option<lipqual::Quality>) {
     let l = match Lip::parse(bytes) {
         Ok(l) => l,
         Err(e) => {
@@ -687,7 +708,10 @@ fn check_lip(path: &Path, bytes: &[u8], entries: Option<&[msg::Entry]>) -> (bool
         ok &= p.severity() != lip::Severity::Error;
     }
     let sound = match named_sound(path, &l) {
-        Ok(Some(s)) => Some(s),
+        Ok(Some(s)) => {
+            decoded.insert(s.0.clone());
+            Some(s)
+        }
         Ok(None) => {
             eprintln!(
                 "{}: no sound {} beside it; its length is not checked",

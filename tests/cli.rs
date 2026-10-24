@@ -828,6 +828,30 @@ fn check_fails_when_the_sound_does_not_decode_and_notes_a_missing_one() {
 }
 
 #[test]
+fn check_counts_a_lip_files_sound_once_as_a_sound_and_fails_it_for_both() {
+    let d = Dir::new();
+    let src = d.path("x.acm");
+    put(&src, &speech(), OutputFormat::Acm);
+    ok(&ipsdoc(&["lip", s(&src)]));
+    let text = ok(&ipsdoc(&["check", s(&d.0)]));
+    assert!(
+        text.ends_with("1 sounds checked, 1 lip files checked, 0 failed\n"),
+        "{text}"
+    );
+    let mut acm = std::fs::read(&src).unwrap();
+    acm.truncate(40);
+    std::fs::write(&src, acm).unwrap();
+    // The lip file fails for its sound, and the sound for itself.
+    let out = ipsdoc(&["check", s(&d.0)]);
+    assert_eq!(out.status.code(), Some(1), "{}", all_output(&out));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.ends_with("1 sounds checked, 1 lip files checked, 2 failed\n"),
+        "{text}"
+    );
+}
+
+#[test]
 fn check_fits_the_sound_the_name_field_names() {
     let d = Dir::new();
     let (a, b) = (d.path("a.acm"), d.path("b.acm"));
