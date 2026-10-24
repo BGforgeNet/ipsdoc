@@ -70,7 +70,7 @@ impl Audio {
     /// The samples as 16-bit integers: exact at 16 bits or fewer, else with TPDF dither (reproducible: a fixed
     /// seed) and clamped.
     pub fn to_i16(&self) -> Vec<i16> {
-        let mut dither = Dither(0x9E37_79B9_7F4A_7C15);
+        let mut dither = Dither::new();
         match &self.samples {
             Samples::Int { bits, data } if *bits <= 16 => data.iter().map(|&v| (v >> 16) as i16).collect(),
             Samples::Int { data, .. } => data.iter().map(|&v| dither.quantise(f64::from(v) / 65536.0)).collect(),
@@ -113,7 +113,7 @@ impl Audio {
         let samples = match self.bits() {
             None => Samples::Float(out),
             Some(bits) => {
-                let mut dither = Dither(0x9E37_79B9_7F4A_7C15);
+                let mut dither = Dither::new();
                 let scale = f64::from(1u32 << (bits - 1));
                 let data = out
                     .iter()
@@ -148,6 +148,11 @@ pub enum ResampleError {
 struct Dither(u64);
 
 impl Dither {
+    /// From a fixed seed, so the same input always gives the same output.
+    fn new() -> Dither {
+        Dither(0x9E37_79B9_7F4A_7C15)
+    }
+
     fn uniform(&mut self) -> f64 {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;
