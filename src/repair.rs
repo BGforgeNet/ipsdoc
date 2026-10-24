@@ -105,19 +105,16 @@ pub fn fixes_read(bytes: &[u8], loaded: &input::Loaded) -> Result<Repair, Repair
     let a = acm::Header::parse(inner)
         .map_err(acm::DecodeError::from)
         .map_err(InputError::from)?;
+    let correct_acm = acm::Header { channels, ..a };
     // Each header as it should be, the fields reading cannot establish kept as stored.
     let headers = wavc_header.map(|w| {
         let correct = wavc::Header {
-            uncompressed: a.samples.wrapping_mul(2),
-            compressed: inner.len() as u32,
-            channels,
-            bits: 16,
-            rate: a.rate,
-            ..w
+            acm_offset: w.acm_offset,
+            unknown: w.unknown,
+            ..wavc::Header::for_acm(&correct_acm, inner.len())
         };
         (w, correct)
     });
-    let correct_acm = acm::Header { channels, ..a };
     let mut fixes = Vec::new();
     let mut check = |field, stored: u32, correct: u32| {
         if stored != correct {

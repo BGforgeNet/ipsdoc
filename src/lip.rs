@@ -24,6 +24,13 @@ pub const EXTENSION: [u8; 4] = *b"VOC\0";
 pub const PHONEME_COUNT: u8 = 42;
 /// With this many markers or fewer the engine logs "Too few markers to stop speech" and skips its wrap check.
 pub const FEW_MARKERS: usize = 5;
+/// The head frame the engine shows for each phoneme code.
+pub const HEAD_FRAME: [u8; PHONEME_COUNT as usize] = [
+    0, 3, 1, 1, 3, 1, 1, 1, 7, 8, 7, 3, 1, 8, 1, 7, 7, 6, 6, 2, 2, 2, 2, 4, 4, 5, 5, 2, 2, 2, 2, 2, 6, 2, 2, 5, 8, 2,
+    2, 2, 2, 8,
+];
+/// The head frame of closed lips: m, p, b.
+pub const CLOSED: u8 = 6;
 
 /// A lip-sync file.
 #[derive(Debug, Clone, PartialEq, Eq)]

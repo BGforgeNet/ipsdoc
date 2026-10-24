@@ -8,8 +8,7 @@
 use std::fmt;
 
 use crate::g2p::{Arpabet, Token};
-use crate::lip::{Lip, PHONEME_COUNT, Severity};
-use crate::lipgen::HEAD_FRAME;
+use crate::lip::{CLOSED, HEAD_FRAME, Lip, PHONEME_COUNT, Severity};
 use crate::pcm::Audio;
 use crate::speech::{self, SpeechParams, frame_start};
 
@@ -276,9 +275,9 @@ pub fn head_frames(l: &Lip, audio: &Audio, frames: usize) -> Vec<u8> {
     out
 }
 
-/// Head frames 0 (rest) and 6 (closed lips: m, p, b) show a shut mouth.
+/// Head frames 0 (rest) and [`CLOSED`] show a shut mouth.
 fn open(frame: u8) -> bool {
-    frame != 0 && frame != 6
+    frame != 0 && frame != CLOSED
 }
 
 /// Judges `l` against `audio`, and against the line's `text` when given. Not at all when `l` holds codes the game
@@ -332,7 +331,7 @@ pub fn quality(l: &Lip, audio: &Audio, text: Option<&[Token]>) -> Quality {
     }
 }
 
-/// Closed-lips shapes (head frame 6) in or within 50 ms of speech, against the text's m, b and p, each placed where
+/// Closed-lips shapes ([`CLOSED`]) in or within 50 ms of speech, against the text's m, b and p, each placed where
 /// it falls with the line's phones spread evenly over `span`, the frames from the first speech to the last. A run of
 /// them (the m b of "remember", the m b of "come back") is one closure, as the lips close once for it; a phrase
 /// break ends a run.
@@ -342,7 +341,7 @@ fn text_fit(shown: &[u8], speaking: &[bool], span: (usize, usize), text: &[Token
     let mut start = 0;
     for i in 1..=n {
         if i == n || shown[i] != shown[start] {
-            if shown[start] == 6 && speaking[start.saturating_sub(5)..(i + 5).min(n)].contains(&true) {
+            if shown[start] == CLOSED && speaking[start.saturating_sub(5)..(i + 5).min(n)].contains(&true) {
                 closures.push((start + i) as f64 / 2.0);
             }
             start = i;

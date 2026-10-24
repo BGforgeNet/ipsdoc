@@ -6,18 +6,12 @@
 //! frame merge, shapes are held a minimum time, changes are capped per second, and pauses show the silent mouth.
 
 use crate::g2p::{self, Token};
-use crate::lip::{self, Lip, Marker};
+use crate::lip::{self, CLOSED, HEAD_FRAME, Lip, Marker};
 use crate::pcm::Audio;
 use crate::speech::{self, SpeechParams};
 
 /// Phoneme codes, one entry each in the per-code tables.
 const CODES: usize = lip::PHONEME_COUNT as usize;
-
-/// The head frame the engine shows for each phoneme code.
-pub const HEAD_FRAME: [u8; CODES] = [
-    0, 3, 1, 1, 3, 1, 1, 1, 7, 8, 7, 3, 1, 8, 1, 7, 7, 6, 6, 2, 2, 2, 2, 4, 4, 5, 5, 2, 2, 2, 2, 2, 6, 2, 2, 5, 8, 2,
-    2, 2, 2, 8,
-];
 
 /// Tuning (times in seconds).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -100,8 +94,6 @@ impl Shape {
     }
 }
 
-/// Closed lips: m, p, b.
-const CLOSED: u8 = 6;
 /// The shape for a vocal noise: an open mouth (A as in father).
 const NOISE_CODE: u8 = 6;
 
@@ -625,7 +617,7 @@ mod tests {
             .phonemes
             .iter()
             .zip(&lip.markers)
-            .filter(|&(&c, _)| HEAD_FRAME[usize::from(c)] == 6)
+            .filter(|&(&c, _)| HEAD_FRAME[usize::from(c)] == CLOSED)
             .map(|(_, m)| f64::from(m.position) / 2.0 / f64::from(RATE) + lead)
             .collect();
         assert_eq!(closed.len(), 2, "{lip:?}");
