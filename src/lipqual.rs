@@ -107,6 +107,9 @@ impl TextFit {
 
 impl fmt::Display for TextFit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.bilabials == 0 {
+            return write!(f, "the line has no m, b or p to check the closed lips against");
+        }
         write!(
             f,
             "the lips close {} times for the line's {} m, b and p, {} of them nearby",
@@ -128,16 +131,15 @@ pub struct Quality {
     /// files) with the loudness, over speech: 0 is chance. The best within the offsets no player sees. `None` when the
     /// mouth shows one width all through the speech.
     pub openness: Option<f64>,
-    /// The best alignment 150 to 300 ms off, and that offset in milliseconds (positive: the mouth runs late).
+    /// The best alignment 150 to 300 ms off, and that offset in milliseconds (positive: the mouth runs late); `None`
+    /// for a line too short to show one.
     pub offset: Option<(f64, f64)>,
-    /// The same 310 to 600 ms off.
+    /// The same 310 to 600 ms off, where a line must be longer still.
     pub far_offset: Option<(f64, f64)>,
     /// Share of the quiet frames, away from speech, that show an open mouth; `None` for a sound with little quiet.
     pub open_while_quiet: Option<f64>,
     /// Shape changes per second of speech; `None` for a sound with little speech.
     pub movement: Option<f64>,
-    /// The sound's length in seconds.
-    pub seconds: f64,
     /// How the closed lips fit the line's text, when it was given.
     pub text: Option<TextFit>,
 }
@@ -217,17 +219,11 @@ impl Quality {
         {
             out.push(QualityProblem::Shut { share });
         }
-        let found = |offset, min_seconds, gain| match (self.alignment, offset) {
-            (Some(near), Some((far, ms)))
-                if self.seconds >= min_seconds && far >= OFFSET_ALIGNMENT && far - near >= gain =>
-            {
-                Some(ms)
-            }
+        let found = |offset, gain| match (self.alignment, offset) {
+            (Some(near), Some((far, ms))) if far >= OFFSET_ALIGNMENT && far - near >= gain => Some(ms),
             _ => None,
         };
-        if let Some(ms) = found(self.offset, OFFSET_MIN_SECONDS, OFFSET_GAIN)
-            .or_else(|| found(self.far_offset, FAR_OFFSET_MIN_SECONDS, FAR_OFFSET_GAIN))
-        {
+        if let Some(ms) = found(self.offset, OFFSET_GAIN).or_else(|| found(self.far_offset, FAR_OFFSET_GAIN)) {
             out.push(QualityProblem::Offset { ms });
         }
         if let Some(t) = self.text
@@ -431,7 +427,6 @@ pub fn quality(l: &Lip, audio: &Audio, text: Option<&[Token]>) -> Quality {
             far_offset: None,
             open_while_quiet: None,
             movement: None,
-            seconds,
             text: None,
         };
     }
@@ -481,12 +476,11 @@ pub fn quality(l: &Lip, audio: &Audio, text: Option<&[Token]>) -> Quality {
         shut_while_loud: (!loud.is_empty()).then(|| shut as f64 / loud.len() as f64),
         alignment: near,
         openness,
-        offset,
-        far_offset,
+        offset: offset.filter(|_| seconds >= OFFSET_MIN_SECONDS),
+        far_offset: far_offset.filter(|_| seconds >= FAR_OFFSET_MIN_SECONDS),
         open_while_quiet: (quiet.len() >= QUIET_MIN).then(|| open_quiet as f64 / quiet.len() as f64),
         movement: (speech_frames >= MOVEMENT_MIN_FRAMES)
             .then(|| changes as f64 * f64::from(speech::FRAMES_PER_SECOND) / speech_frames as f64),
-        seconds,
         text: text.map(|t| text_fit(&shown, &speaking, span, t)),
     }
 }
@@ -743,10 +737,15 @@ mod tests {
         };
         assert!((200.0..=300.0).contains(&ms), "{ms}");
         assert_eq!(q.problems()[0].severity(), Severity::Warning);
-        // On a line too short to tell, the same measures report nothing.
-        let at = |seconds| Quality { seconds, ..q };
-        assert_eq!(at(OFFSET_MIN_SECONDS).problems(), q.problems());
-        assert_eq!(at(OFFSET_MIN_SECONDS - 0.1).problems(), []);
+        // Cut shorter, the line first shows no far offset, then none at all.
+        let cut = |tenths: usize| {
+            let short = Audio::from_i16(22050, 1, audio.to_i16()[..22050 * tenths / 10].to_vec());
+            quality(&following(&short, &bursts, 22050 / 4), &short, None)
+        };
+        let q = cut(25);
+        assert!(q.offset.is_some() && q.far_offset.is_none(), "{q:?}");
+        let q = cut(19);
+        assert_eq!((q.offset, q.far_offset, q.problems()), (None, None, vec![]));
     }
 
     #[test]
@@ -795,6 +794,19 @@ mod tests {
         let speaking: Vec<bool> = [vec![false; 20], vec![true; 5], vec![false; 40]].concat();
         let want: Vec<usize> = (0..5).chain(40..65).collect();
         assert_eq!(quiet_frames(&speaking), want);
+    }
+
+    #[test]
+    fn a_line_without_m_b_or_p_says_so() {
+        let fit = TextFit {
+            bilabials: 0,
+            closures: 2,
+            placed: 0,
+        };
+        assert_eq!(
+            (fit.ratio(), fit.to_string().as_str()),
+            (None, "the line has no m, b or p to check the closed lips against")
+        );
     }
 
     #[test]
@@ -863,7 +875,6 @@ mod tests {
             far_offset: None,
             open_while_quiet: None,
             movement: None,
-            seconds: 3.0,
             text: None,
         };
         assert_eq!(grade(&vec![file(0.5, 0.9); SET_MIN - 1]), None);
