@@ -26,6 +26,8 @@ fetch() {
         git init -q "$repo"
         git -C "$repo" remote add origin "$url"
     fi
+    # A checkout from an earlier run keeps its remote: point it at this URL, in case the pin moved repositories.
+    git -C "$repo" remote set-url origin "$url"
     # A fresh repository has no HEAD yet: rev-parse fails, which means "not at the commit".
     if [ "$(git -C "$repo" rev-parse -q --verify HEAD || true)" != "$commit" ]; then
         git -C "$repo" sparse-checkout set --no-cone "$@"
@@ -47,9 +49,9 @@ stamp() {
 
 # Third-party sources are compiled as published; their warnings are not ours to fix (-w).
 
-c=e97087b9582f37075db347a89898887320753f8b
+c=0e5d1c7d0c3bf91af0cf323ba48217631de8e6f9
 if ! fresh fallout2ce "$c"; then
-    fetch fallout2-ce https://github.com/alexbatalov/fallout2-ce.git "$c" src/sound_decoder.cc src/sound_decoder.h
+    fetch fallout2-ce https://github.com/fallout2-ce/fallout2-ce.git "$c" src/sound_decoder.cc src/sound_decoder.h
     s=$dir/src/fallout2-ce/src
     "$cxx" -std=c++17 -O2 -w -I"$csrc" -I"$s" "$s/sound_decoder.cc" "$csrc/fallout2ce.cc" -o "$dir/bin/acm-fallout2ce"
     stamp fallout2ce "$c"
