@@ -91,19 +91,7 @@ myn1003a.lip: last marker 327380 -> 654760
 
 ### Formats
 
-| Format                        | Read | Write |
-| ----------------------------- | ---- | ----- |
-| ACM                           | yes  | yes   |
-| WAVC (Infinity Engine `.wav`) | yes  | yes   |
-| RIFF WAV                      | yes  | yes   |
-| Ogg Vorbis                    | yes  | yes   |
-| FLAC, MP3, AAC, ALAC          | yes  | no    |
-| Headerless PCM                | yes  | no    |
-| Fallout lip sync (`.lip`)     | yes  | yes   |
-
-Formats are recognised by content, not by name: an Infinity Engine `.wav` may hold RIFF, WAVC or Ogg Vorbis.
-
-Details per format: `docs/formats.md`. What ipsdoc does about the files' quirks: `docs/quirks.md`.
+What ipsdoc reads and writes, per format: `docs/formats.md`. What it does about the files' quirks: `docs/quirks.md`.
 
 How lip files are written and checked: `docs/lip-sync.md`.
 
