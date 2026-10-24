@@ -71,11 +71,15 @@ Formats are recognised by content, not by name: an Infinity Engine `.wav` may ho
 
 ### Installing
 
-Each release has an archive for Linux (x86-64), Windows (x86-64) and macOS (Apple silicon), holding the program and
-its notices; unpack it anywhere.
+Each release has an archive for Linux (x86-64, ARM64), Windows (x86-64, 32-bit x86) and macOS (Apple silicon and
+Intel in one program), holding the program and its notices; unpack it anywhere. The Linux and Windows programs are
+static: they need no libraries beyond what the system ships.
 
 To build it instead, install Rust (the version is pinned in `rust-toolchain.toml`) and a C compiler (for libvorbis),
-then `cargo build --release`. Development notes, the test oracles and the corpus tests: `docs/development.md`.
+then `cargo build --release`. The release builds are cross-built with [Zig](https://ziglang.org/) as the C compiler
+and linker: install zig and `cargo-zigbuild` and put them on `PATH`, then
+`cargo zigbuild --release --target x86_64-unknown-linux-musl` (the targets are in `.github/workflows/build.yml`).
+Development notes, the test oracles and the corpus tests: `docs/development.md`.
 
 ### Licence
 

@@ -43,7 +43,7 @@ jobs:
           RUSTDOCFLAGS: -D warnings
       - run: cargo deny --workspace check
       - run: cargo machete
-      - run: shellcheck oracles/*.sh
+      - run: shellcheck oracles/*.sh tests/*.sh
       # install-action has no actionlint; the Go module proxy serves this tag checksummed.
       - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - run: zizmor --offline .github/workflows
@@ -144,25 +144,32 @@ jobs:
         env:
           IPSDOC_TOOLS_REQUIRE: snd2acm,acmtools,acmtools-decoded
 
+  # Every binary is cross-built on Linux with zig as the C compiler and linker: Linux and Windows builds are static
+  # (Windows ones load only system DLLs, the Universal C Runtime among them), and macOS's are universal, linking only
+  # the system library, as every macOS program does. The smoke job runs each on its own platform.
   build:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+          - target: x86_64-unknown-linux-musl
+            rust-targets: x86_64-unknown-linux-musl
             exe: ipsdoc
-          - os: windows-latest
-            target: x86_64-pc-windows-gnu
+          - target: aarch64-unknown-linux-musl
+            rust-targets: aarch64-unknown-linux-musl
+            exe: ipsdoc
+          - target: x86_64-pc-windows-gnu
+            rust-targets: x86_64-pc-windows-gnu
             exe: ipsdoc.exe
-          - os: macos-latest
-            target: aarch64-apple-darwin
+          - target: i686-pc-windows-gnu
+            rust-targets: i686-pc-windows-gnu
+            exe: ipsdoc.exe
+          # Not a rustup target: cargo-zigbuild builds the two it names and merges them.
+          - target: universal2-apple-darwin
+            rust-targets: x86_64-apple-darwin aarch64-apple-darwin
             exe: ipsdoc
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
-    defaults:
-      run:
-        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -172,11 +179,16 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-${{ matrix.target }}
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+          use-cache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          cache-key: ${{ matrix.target }}
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
-          tool: cargo-about@0.9.2
-      - run: rustup target add ${{ matrix.target }}
-      - run: cargo build -p ipsdoc --release --locked --target ${{ matrix.target }}
+          tool: cargo-about@0.9.2,cargo-zigbuild@0.23.4
+      - run: rustup target add ${{ matrix.rust-targets }}
+      - run: cargo zigbuild -p ipsdoc --release --locked --target ${{ matrix.target }}
       - run: |
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" LICENSE README.md dist/
@@ -188,10 +200,53 @@ jobs:
           path: dist
           if-no-files-found: error
 
+  # The shipped binaries, run where they are meant to run: nothing on the build runner can run most of them. Real
+  # Windows rather than wine, whose own C runtime says nothing about loading the Universal C Runtime; the 32-bit build
+  # runs under WoW64. One macOS runner per architecture, so each slice of the universal binary runs.
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            exe: ipsdoc
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            exe: ipsdoc
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+            exe: ipsdoc.exe
+          - os: windows-latest
+            target: i686-pc-windows-gnu
+            exe: ipsdoc.exe
+          - os: macos-26
+            target: universal2-apple-darwin
+            exe: ipsdoc
+          - os: macos-26-intel
+            target: universal2-apple-darwin
+            exe: ipsdoc
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ipsdoc-${{ matrix.target }}
+          path: ${{ runner.temp }}/dist
+      # Artifacts do not keep the executable bit.
+      - run: chmod +x "$RUNNER_TEMP/dist/${{ matrix.exe }}" && tests/smoke.sh "$RUNNER_TEMP/dist/${{ matrix.exe }}"
+
   # Read-only everywhere else; only publishing a tag's release writes.
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [lint, test, oracles, cross-tools, build]
+    needs: [lint, test, oracles, cross-tools, build, smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -201,6 +256,8 @@ jobs:
         with:
           pattern: ipsdoc-*
           path: dist
+      # Artifacts do not keep the executable bit, and zip stores the mode each file has.
+      - run: chmod +x dist/ipsdoc-*/ipsdoc
       - run: |
           cd dist
           for d in ipsdoc-*; do (cd "$d" && zip -q -r "../$d.zip" .); done
