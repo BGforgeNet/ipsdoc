@@ -9,7 +9,7 @@
 //! Run with `--ignored` and `IPSDOC_LIPS=<dir>` (`sound/speech` extracted from `master.dat`: a directory per speaker
 //! holding each line's ACM and LIP), `IPSDOC_MSG=<dir>` (the English `data/text/english/dialog` of the Unofficial
 //! Patch) and `IPSDOC_LIPS_WAV2LIP=<dir>` (wav2lip's lip file per line, `docs/development.md`).
-//! `IPSDOC_LIPS_LIMIT=N` scores only the first N lines of each half.
+//! `IPSDOC_LIPS_LIMIT=N` shortens the run (`docs/development.md` says how).
 #![expect(
     clippy::unwrap_used,
     reason = "test harness code outside #[test] fns: a panic is the failure report"
