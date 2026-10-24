@@ -131,9 +131,8 @@ struct ConvertArgs {
 
 #[derive(Debug, Args)]
 struct LipArgs {
-    /// Sounds to write lip files for: each gets a `.lip` beside it, replacing (and naming) any there, and an empty
-    /// `.txt`, for LIP Editor, if none is there. Positions follow each sound's own samples: give the ACM the game
-    /// plays, or the WAV it is made from.
+    /// Sounds to write lip files for: each gets a `.lip` beside it, replacing (and naming) any there. Positions
+    /// follow each sound's own samples: give the ACM the game plays, or the WAV it is made from.
     #[arg(required_unless_present = "rescale")]
     sounds: Vec<PathBuf>,
     /// The dialog message file holding each sound's line, found by its sound field (`{103}{Cas0103}{...}`).
@@ -718,10 +717,6 @@ fn lip_one(sound: &Path, a: &LipArgs, entries: Option<&[msg::Entry]>) -> Result<
     replace_file(&out, &l.to_bytes()).map_err(|e| fail(1, format!("{}: {e}", out.display())))?;
     if replaced {
         println!("{}: replaced", out.display());
-    }
-    let txt = out.with_extension("txt");
-    if !txt.exists() {
-        std::fs::write(&txt, b"").map_err(|e| fail(1, format!("{}: {e}", txt.display())))?;
     }
     Ok(())
 }

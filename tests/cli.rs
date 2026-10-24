@@ -30,6 +30,16 @@ impl Dir {
     fn path(&self, name: &str) -> PathBuf {
         self.0.join(name)
     }
+
+    /// The names of the files in it, sorted.
+    fn files(&self) -> Vec<String> {
+        let mut names: Vec<_> = std::fs::read_dir(&self.0)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        names
+    }
 }
 
 impl Drop for Dir {
@@ -381,7 +391,7 @@ fn all_output(out: &Output) -> String {
 }
 
 #[test]
-fn lip_writes_a_lip_and_an_empty_txt_beside_the_sound() {
+fn lip_writes_a_lip_beside_the_sound_and_nothing_else() {
     let d = Dir::new();
     let src = d.path("x.acm");
     put(&src, &speech(), OutputFormat::Acm);
@@ -391,7 +401,7 @@ fn lip_writes_a_lip_and_an_empty_txt_beside_the_sound() {
     let lip = lip_at(&d.path("x.lip"));
     assert_eq!(lip.last(), 2 * 22050);
     assert_eq!(lip.name(), "X");
-    assert_eq!(std::fs::read(d.path("x.txt")).unwrap(), b"");
+    assert_eq!(d.files(), ["x.acm", "x.lip"]);
     ok(&ipsdoc(&["check", s(&d.path("x.lip"))]));
     assert!(!ok(&out).contains("replaced"), "{}", all_output(&out));
     // A second run replaces the lip file, and says so.
@@ -501,11 +511,7 @@ fn lip_rescale_fits_a_lip_to_another_sound() {
     ok(&ipsdoc(&["lip", "--rescale", s(&lip), "--for", s(&big)]));
     assert_eq!(lip_at(&lip).last(), 8 * 22050);
     // Replaced through a sibling file, which is gone afterwards.
-    let left: Vec<_> = std::fs::read_dir(&d.0)
-        .unwrap()
-        .map(|e| e.unwrap().file_name())
-        .collect();
-    assert_eq!(left.len(), 4, "{left:?}");
+    assert_eq!(d.files(), ["big.acm", "x.acm", "x.lip"]);
 }
 
 #[test]
