@@ -109,7 +109,8 @@ pub fn write(audio: &Audio, format: OutputFormat, opts: &WriteOptions) -> Result
     }
 }
 
-/// Whether RIFF output of `audio` is dithered to 16 bits: GemRB and Near Infinity read 8 and 16-bit integer PCM only.
+/// Whether RIFF output of `audio` is dithered to 16 bits: Infinity Engine games read WAV up to 16-bit, and so do GemRB
+/// and Near Infinity.
 pub fn riff_dithers(audio: &Audio, opts: &WriteOptions) -> bool {
     !opts.riff_full_depth && audio.deeper_than_16()
 }

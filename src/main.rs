@@ -128,8 +128,8 @@ struct ConvertArgs {
     /// Wrap ACM samples beyond 16 bits as the engines do (an audible click), instead of clamping them.
     #[arg(long)]
     wrap: bool,
-    /// Write a WAV at the input's depth (24 or 32-bit, or float), which GemRB and Near Infinity cannot read, instead
-    /// of dithering it to 16 bits.
+    /// Write a WAV at the input's depth (24 or 32-bit, or float) instead of dithering it to 16 bits. Infinity Engine
+    /// games read WAV up to 16-bit.
     #[arg(long)]
     full_depth: bool,
 }
@@ -268,7 +268,7 @@ fn convert(a: &ConvertArgs) -> Result<(), Failure> {
     }
     if format == OutputFormat::Riff && output::riff_dithers(&audio, &write_opts) {
         eprintln!(
-            "{}: 16-bit, from {} input: GemRB and Near Infinity read no deeper; --full-depth keeps it",
+            "{}: 16-bit, from {} input: Infinity Engine games read WAV up to 16-bit; --full-depth keeps it",
             output.display(),
             depth(&audio)
         );

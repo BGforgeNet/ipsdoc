@@ -172,7 +172,7 @@ fn deep_wav_output_is_16_bit_unless_asked_for_the_full_depth() {
     std::fs::write(&src, write(&deep, OutputFormat::Riff, &full).unwrap()).unwrap();
     let said = |input: &str| {
         format!(
-            "{}: 16-bit, from {input} input: GemRB and Near Infinity read no deeper; --full-depth keeps it\n",
+            "{}: 16-bit, from {input} input: Infinity Engine games read WAV up to 16-bit; --full-depth keeps it\n",
             s(&dst)
         )
     };
