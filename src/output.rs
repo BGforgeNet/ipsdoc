@@ -7,7 +7,7 @@ use std::path::Path;
 
 #[cfg(test)]
 use crate::detect::Format;
-pub use crate::pcm::{Audio, Samples};
+use crate::pcm::{Audio, Samples};
 
 /// A container to write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

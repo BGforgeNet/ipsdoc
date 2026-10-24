@@ -11,8 +11,8 @@ use symphonia::core::io::MediaSourceStream;
 use crate::acm::{self, Overflow};
 pub use crate::analysis::ChannelEvidence;
 use crate::analysis::swapped_rate;
-pub use crate::detect::Format;
-pub use crate::pcm::{Audio, Samples};
+use crate::detect::Format;
+use crate::pcm::{Audio, Samples};
 use crate::wavc;
 
 /// How to read.
