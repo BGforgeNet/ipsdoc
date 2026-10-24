@@ -56,7 +56,7 @@ impl Default for Params {
 /// The lip file for `audio`, a sound named `name`, from its line's `tokens` when there are any.
 pub fn generate(name: &str, audio: &Audio, tokens: Option<&[Token]>, p: &Params) -> Lip {
     let a = speech::analyse(audio, &p.speech);
-    let total = audio.frames() as f64 * f64::from(speech::FRAMES_PER_SECOND) / f64::from(audio.rate.max(1));
+    let total = audio.frames() as f64 * f64::from(speech::FRAMES_PER_SECOND) / f64::from(audio.rate);
     let phrases = tokens.map(phrases).unwrap_or_default();
     let mut shapes = vec![Shape { start: 0.0, code: 0 }];
     if phrases.is_empty() {
@@ -463,7 +463,7 @@ fn remove(v: &mut Vec<Shape>, i: usize, total: f64) {
 /// The shapes as a lip file: positions 2 x the interleaved sample index, the last at the sound's end; at least
 /// six markers.
 fn to_lip(name: &str, audio: &Audio, shapes: &[Shape]) -> Lip {
-    let channels = i64::from(audio.channels.max(1));
+    let channels = i64::from(audio.channels);
     let last = 2 * audio.len() as i64;
     let position = |t: f64| -> i32 {
         let frame = (t * f64::from(audio.rate) / f64::from(speech::FRAMES_PER_SECOND)).round() as i64;

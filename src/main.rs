@@ -322,7 +322,7 @@ fn info(path: &Path) -> Result<(), Failure> {
         a.channels,
         a.rate,
         a.frames(),
-        a.frames() as f64 / f64::from(a.rate.max(1))
+        a.frames() as f64 / f64::from(a.rate)
     );
     for n in &loaded.notes {
         println!("  note: {}", describe(n));
@@ -540,7 +540,7 @@ fn lip_info(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
     );
     match named_sound(path, &l) {
         Ok(Some((acm, audio))) => {
-            let secs = audio.frames() as f64 / f64::from(audio.rate.max(1));
+            let secs = audio.frames() as f64 / f64::from(audio.rate);
             let fit = match lip::fit(l.last(), audio.len()) {
                 lip::Fit::Matches => "fits it".to_owned(),
                 lip::Fit::Scaled(f) => format!("is {f}x its length"),

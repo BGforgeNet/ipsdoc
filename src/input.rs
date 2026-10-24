@@ -100,6 +100,12 @@ pub enum InputError {
     /// The container holds no audio track, or a track without a sample rate or channel layout.
     #[error("no usable audio track")]
     NoAudio,
+    /// No rate from the header, and none given ([`ReadOptions::rate`]).
+    #[error("sample rate 0")]
+    ZeroRate,
+    /// No channels from the container, and none given ([`ReadOptions::channels`]).
+    #[error("0 channels")]
+    ZeroChannels,
     /// Raw 16-bit input of an odd length.
     #[error("{len} bytes of raw 16-bit PCM: not a whole number of samples")]
     RawLength {
@@ -141,6 +147,12 @@ pub fn read(bytes: &[u8], opts: &ReadOptions) -> Result<Loaded, InputError> {
     }
     if let Some(r) = opts.rate {
         loaded.audio.rate = r.get();
+    }
+    if loaded.audio.rate == 0 {
+        return Err(InputError::ZeroRate);
+    }
+    if loaded.audio.channels == 0 {
+        return Err(InputError::ZeroChannels);
     }
     // The notes report what is used, overrides included.
     for n in &mut loaded.notes {
@@ -412,6 +424,29 @@ mod tests {
         assert_eq!(l.format, Format::Wavc);
         assert_eq!((l.audio.channels, l.audio.rate), (2, 22050));
         assert_eq!(l.audio.to_i16(), [5, -5, 7, -7]);
+    }
+
+    #[test]
+    fn a_wavc_whose_headers_agree_on_no_channels_reads_as_mono() {
+        let inner = acm_stream(&[5, -5, 7, -7], 0, 22050);
+        let l = read(&crate::wavc::wrap(&inner).unwrap(), &ReadOptions::default()).unwrap();
+        assert_eq!(l.audio.channels, 1);
+        assert!(l.notes.contains(&Note::Channels {
+            header: 0,
+            used: 1,
+            evidence: ChannelEvidence::HeaderMono
+        }));
+    }
+
+    #[test]
+    fn a_rate_of_zero_is_refused_unless_one_is_given() {
+        let b = acm_stream(&[1, 2], 1, 0);
+        assert!(matches!(read(&b, &ReadOptions::default()), Err(InputError::ZeroRate)));
+        let given = ReadOptions {
+            rate: NonZeroU32::new(22050),
+            ..ReadOptions::default()
+        };
+        assert_eq!(read(&b, &given).unwrap().audio.rate, 22050);
     }
 
     #[test]

@@ -3,9 +3,9 @@
 /// Interleaved audio.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Audio {
-    /// Frames per second.
+    /// Frames per second; never 0 ([`crate::input::read`] refuses it).
     pub rate: u32,
-    /// Channels per frame.
+    /// Channels per frame; never 0 ([`crate::input::read`] refuses it).
     pub channels: u16,
     /// The samples, all channels interleaved.
     pub samples: Samples,
@@ -59,7 +59,7 @@ impl Audio {
 
     /// Whole frames.
     pub fn frames(&self) -> usize {
-        self.len() / usize::from(self.channels.max(1))
+        self.len() / usize::from(self.channels)
     }
 
     /// The samples as 16-bit integers: exact at 16 bits or fewer, else with TPDF dither (reproducible: a fixed

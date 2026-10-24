@@ -80,13 +80,13 @@ const LOW_HZ: f32 = 1000.0;
 
 /// Analyses `audio`.
 pub fn analyse(audio: &Audio, p: &SpeechParams) -> Analysis {
-    let channels = usize::from(audio.channels.max(1));
+    let channels = usize::from(audio.channels);
     let samples = audio.to_f32();
     let mono: Vec<f32> = samples
         .chunks_exact(channels)
         .map(|f| f.iter().sum::<f32>() / channels as f32)
         .collect();
-    let rate = audio.rate.max(1);
+    let rate = audio.rate;
     let per = FRAMES_PER_SECOND as usize;
     let count = (mono.len() * per).div_ceil(rate as usize);
     let alpha = 1.0 - (-std::f32::consts::TAU * LOW_HZ / rate as f32).exp();

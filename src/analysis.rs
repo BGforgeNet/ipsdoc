@@ -126,11 +126,12 @@ impl ChannelEvidence {
 
     /// Weighs a WAVC's two headers and its content. The Infinity Engine plays a WAVC by its header, and some stereo
     /// effects read as interleaved mono yet play right as stereo (`tests/channel_detector.rs` counts them), so
-    /// agreeing headers are trusted; disagreeing ones are settled as a bare ACM's would be, on a stereo claim.
+    /// agreeing headers are trusted; disagreeing ones, or two that claim no channels, are settled as a bare ACM's
+    /// would be.
     pub fn of_wavc(wavc_channels: u16, acm_channels: u16, samples: &[i16]) -> ChannelEvidence {
         if wavc_channels == 2 && acm_channels == 2 && samples.len() % 2 == 1 {
             ChannelEvidence::OddSampleCount
-        } else if wavc_channels == acm_channels {
+        } else if wavc_channels == acm_channels && wavc_channels > 0 {
             ChannelEvidence::WavcHeaders
         } else {
             ChannelEvidence::of(wavc_channels.max(acm_channels), samples)
