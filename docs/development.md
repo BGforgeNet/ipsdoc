@@ -1,7 +1,10 @@
 # Development
 
-The gate is the set of commands in `.github/workflows/build.yml` (jobs `lint`, `test`, `oracles`); run them locally
-before a commit. The `lint` job pins the versions of the tools it installs; `actionlint` runs through `go run`.
+The gate is `.github/workflows/build.yml`: a release waits on the jobs its `release` job needs. Before a commit, run the
+commands of the jobs that need no Windows runner, other encoder or cross build (`lint`, `test`, `oracles`) locally. They
+need the tools the `lint` job installs, at its pinned versions, on `PATH`; Go, for `actionlint`; `RUNNER_TEMP` set to an
+absolute scratch directory outside the repository, for `.github/scripts/build-oxfmt.sh`; and the reference decoders
+(below), for `oracles`.
 
 ## Reference decoders
 
