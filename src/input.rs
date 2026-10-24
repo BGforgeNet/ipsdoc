@@ -236,6 +236,8 @@ fn read_general(bytes: &[u8]) -> Result<Audio, InputError> {
         .make_audio_decoder(params, &Default::default())
         .map_err(InputError::Decode)?;
     let (mut ints, mut floats, mut bits) = (Vec::<i32>::new(), Vec::<f32>::new(), None::<u16>);
+    // One packet's samples; each copy resizes the buffer to the packet and overwrites it.
+    let (mut part, mut ipart) = (Vec::<f32>::new(), Vec::<i32>::new());
     while let Some(packet) = reader.next_packet().map_err(InputError::Decode)? {
         if packet.track_id != track_id {
             continue;
@@ -249,14 +251,12 @@ fn read_general(bytes: &[u8]) -> Result<Audio, InputError> {
             GenericAudioBufferRef::U32(_) | GenericAudioBufferRef::S32(_) => 32,
             GenericAudioBufferRef::F32(_) | GenericAudioBufferRef::F64(_) => 0,
         });
-        let mut part = Vec::new();
         if depth == 0 {
             buf.copy_to_vec_interleaved::<f32>(&mut part);
-            floats.extend(part);
+            floats.extend_from_slice(&part);
         } else {
-            let mut ipart = Vec::new();
             buf.copy_to_vec_interleaved::<i32>(&mut ipart);
-            ints.extend(ipart);
+            ints.extend_from_slice(&ipart);
         }
     }
     let samples = match bits {
