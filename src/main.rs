@@ -385,7 +385,9 @@ fn files_under(path: &Path, walked: &mut HashSet<PathBuf>, out: &mut Vec<PathBuf
 fn read_if_sound(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
     let mut f = std::fs::File::open(path)?;
     let mut bytes = Vec::new();
-    (&mut f).take(detect::HEAD_LEN.max(lip::HEADER_LEN) as u64).read_to_end(&mut bytes)?;
+    (&mut f)
+        .take(detect::HEAD_LEN.max(lip::HEADER_LEN) as u64)
+        .read_to_end(&mut bytes)?;
     if detect(&bytes) == Format::Other && !lip::looks_like(&bytes) {
         return Ok(None);
     }
@@ -406,7 +408,11 @@ fn check(paths: &[PathBuf]) -> Result<(), Failure> {
         for f in files {
             // Inside a directory only sounds and lip files are checked; a file named outright is checked whatever
             // it is.
-            let read = if explicit { std::fs::read(&f).map(Some) } else { read_if_sound(&f) };
+            let read = if explicit {
+                std::fs::read(&f).map(Some)
+            } else {
+                read_if_sound(&f)
+            };
             let bytes = match read {
                 Ok(Some(b)) => b,
                 Ok(None) => continue,
