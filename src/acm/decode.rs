@@ -79,13 +79,22 @@ pub enum DecodeError {
         len: usize,
     },
     /// The header's sample count needs more blocks than the input could hold, each block taking at least 20 bits
-    /// plus 5 per column: checked before decoding, so a corrupt header cannot drive a huge sample buffer.
+    /// plus 5 per column: checked before decoding.
     #[error("the header needs {blocks} blocks; the input holds at most {fit}")]
     TooManyBlocks {
         /// Blocks the header needs.
         blocks: u64,
         /// Blocks that could begin within the input.
         fit: u64,
+    },
+    /// The header's sample count is more than [`MAX_SAMPLES_PER_BIT`] times the input's bits: checked before
+    /// decoding, so a corrupt header cannot drive a huge sample buffer.
+    #[error("the header claims {samples} samples; {bits} bits of input hold at most {}", bits * MAX_SAMPLES_PER_BIT)]
+    TooManySamples {
+        /// Samples the header claims.
+        samples: u64,
+        /// Bits of input after the header.
+        bits: u64,
     },
     /// The input ends before a block the header's sample count needs begins.
     #[error("stream ends before block {block} of {blocks}")]
@@ -111,6 +120,11 @@ pub enum Overflow {
 /// (levels 8, rows 16) and the lossless encoder 256; 16 times the largest bounds a hostile header's block buffer at
 /// 256 KiB.
 pub const MAX_BLOCK_LEN: usize = 1 << 16;
+
+/// The most samples decoded per bit of input. The block minimum alone allows 655 (levels 4, rows 4095), while the
+/// lossless encoder's silent blocks hold 10.24 (256 samples in 25 bits) and the games' and mods' ACMs at most 3.15;
+/// 16 bounds a hostile header's sample buffer at 256 bytes per input byte.
+pub const MAX_SAMPLES_PER_BIT: u64 = 16;
 
 /// Decodes a bare ACM stream (header first), clamping overflowing samples.
 ///
@@ -142,6 +156,12 @@ pub fn decode_with(acm: &[u8], overflow: Overflow) -> Result<Decoded, DecodeErro
     let fit = total_bits.div_ceil(20 + 5 * cols as u64);
     if blocks > fit {
         return Err(DecodeError::TooManyBlocks { blocks, fit });
+    }
+    if u64::from(header.samples) > total_bits * MAX_SAMPLES_PER_BIT {
+        return Err(DecodeError::TooManySamples {
+            samples: header.samples.into(),
+            bits: total_bits,
+        });
     }
     let mut samples = Vec::with_capacity(total);
     let mut block = vec![0i32; block_len];
@@ -785,6 +805,23 @@ mod tests {
                 fit: 1
             }
         );
+    }
+
+    #[test]
+    fn rejects_more_samples_than_the_input_could_encode_before_allocating() {
+        // 820 KB of data under 2^32 - 1 samples in blocks of 16 x 4095: enough bits for every block's minimum, and
+        // an 8 GiB buffer if allocated.
+        assert_eq!(
+            decode(&header_over(4, 4095, u32::MAX, 820_000)).unwrap_err(),
+            DecodeError::TooManySamples {
+                samples: u64::from(u32::MAX),
+                bits: 6_560_000
+            }
+        );
+        // Silence through the lossless encoder, the densest stream it writes, still decodes.
+        let silence = vec![0i16; 256 * 64];
+        let acm = crate::acm::encode(&silence, 1, 22050).unwrap();
+        assert_eq!(decode(&acm).unwrap().samples, silence);
     }
 
     #[test]
