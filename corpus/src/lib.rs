@@ -134,6 +134,66 @@ pub fn inflate_bif(bytes: &[u8]) -> io::Result<Option<Vec<u8>>> {
     Ok(None)
 }
 
+/// One line of the manifest the `corpus` tool writes: `container, path, offset, length, origin`, tab-separated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Row<'a> {
+    /// The container's name ([`Format::name`]).
+    pub container: &'a str,
+    /// The file holding the stream.
+    pub path: &'a str,
+    /// The stream's byte offset in the file.
+    pub offset: u64,
+    /// The stream's length in bytes.
+    pub len: u64,
+    /// `-` for a loose file, else the archive and entry it came from.
+    pub origin: &'a str,
+}
+
+impl<'a> Row<'a> {
+    /// Parses a manifest line.
+    ///
+    /// # Errors
+    ///
+    /// When the line does not hold the five fields, or the offset or length is not a number.
+    pub fn parse(line: &'a str) -> io::Result<Row<'a>> {
+        let f: Vec<&str> = line.split('\t').collect();
+        let [container, path, offset, len, origin] = f[..] else {
+            return Err(invalid(format!("not a manifest line: {line:?}")));
+        };
+        let number = |s: &str| s.parse().map_err(|e| invalid(format!("{line:?}: {e}")));
+        Ok(Row {
+            container,
+            path,
+            offset: number(offset)?,
+            len: number(len)?,
+            origin,
+        })
+    }
+
+    /// The stream's bytes.
+    ///
+    /// # Errors
+    ///
+    /// As [`read_at`].
+    pub fn read(&self) -> io::Result<Vec<u8>> {
+        read_at(self.path, self.offset, self.len)
+    }
+}
+
+/// `len` bytes of the file at `path`, from `offset`: a manifest row's stream.
+///
+/// # Errors
+///
+/// When the file cannot be read, or ends before the stream does.
+pub fn read_at(path: &str, offset: u64, len: u64) -> io::Result<Vec<u8>> {
+    let mut f = std::fs::File::open(path)?;
+    f.seek(SeekFrom::Start(offset))?;
+    let len = usize::try_from(len).map_err(|e| invalid(format!("{path}: {e}")))?;
+    let mut bytes = vec![0; len];
+    f.read_exact(&mut bytes)?;
+    Ok(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,6 +223,35 @@ mod tests {
 
     fn zlib(data: &[u8]) -> Vec<u8> {
         miniz_oxide::deflate::compress_to_vec_zlib(data, 6)
+    }
+
+    #[test]
+    fn reads_a_manifest_row_and_its_bytes() {
+        let file = std::env::temp_dir().join(format!("corpus-row-{}", std::process::id()));
+        std::fs::write(&file, b"..WAVC..").unwrap();
+        let line = format!("wavc\t{}\t2\t4\tx.bif#3", file.display());
+        let row = Row::parse(&line).unwrap();
+        assert_eq!(
+            (row.container, row.offset, row.len, row.origin),
+            ("wavc", 2, 4, "x.bif#3")
+        );
+        assert_eq!(row.read().unwrap(), b"WAVC");
+        std::fs::remove_file(&file).unwrap();
+    }
+
+    #[test]
+    fn refuses_a_manifest_row_of_other_fields() {
+        for line in [
+            "acm\tx.acm\t0\t4",
+            "acm\tx.acm\t0\tfour\t-",
+            "acm\tx.acm\t0\t4\t-\textra",
+        ] {
+            assert_eq!(
+                Row::parse(line).unwrap_err().kind(),
+                io::ErrorKind::InvalidData,
+                "{line}"
+            );
+        }
     }
 
     #[test]

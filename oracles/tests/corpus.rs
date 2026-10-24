@@ -12,9 +12,7 @@
 )]
 
 use std::collections::{BTreeMap, HashMap};
-use std::fs::File;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::{Read, Seek, SeekFrom};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -48,12 +46,7 @@ struct Tally {
 }
 
 fn read(path: &str, offset: u64, len: u64) -> Vec<u8> {
-    let mut f = File::open(path).unwrap_or_else(|e| panic!("{path}: {e}"));
-    f.seek(SeekFrom::Start(offset)).unwrap();
-    let mut bytes = vec![0; len as usize];
-    f.read_exact(&mut bytes)
-        .unwrap_or_else(|e| panic!("{path} at {offset}: {e}"));
-    bytes
+    corpus::read_at(path, offset, len).unwrap_or_else(|e| panic!("{path} at {offset}: {e}"))
 }
 
 /// The unique ACM and WAVC streams.
@@ -69,14 +62,11 @@ fn load_containers(containers: &[&str]) -> Vec<Stream> {
     let mut streams: Vec<Stream> = Vec::new();
     let mut seen: HashMap<u64, usize> = HashMap::new();
     for line in text.lines() {
-        let f: Vec<&str> = line.split('\t').collect();
-        let [container, path, offset, len, origin] = f[..] else {
-            panic!("bad manifest line: {line}")
-        };
+        let row = corpus::Row::parse(line).unwrap_or_else(|e| panic!("{manifest}: {e}"));
+        let (container, path, offset, len, origin) = (row.container, row.path, row.offset, row.len, row.origin);
         if !containers.contains(&container) {
             continue;
         }
-        let (offset, len) = (offset.parse().unwrap(), len.parse().unwrap());
         let mut h = DefaultHasher::new();
         read(path, offset, len).hash(&mut h);
         match seen.get(&h.finish()) {

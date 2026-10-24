@@ -8,41 +8,25 @@
 //! - `ie-sfx`: other WAVCs, which the Infinity Engine plays as their WAVC header says.
 
 use std::collections::HashSet;
-use std::fs::File;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::{Read, Seek, SeekFrom};
 use std::process::ExitCode;
 
+use corpus::Row;
 use ipsdoc::acm;
 use ipsdoc::analysis::Features;
-
-fn read(path: &str, offset: u64, len: u64) -> std::io::Result<Vec<u8>> {
-    let mut f = File::open(path)?;
-    f.seek(SeekFrom::Start(offset))?;
-    let mut b = vec![0; len as usize];
-    f.read_exact(&mut b)?;
-    Ok(b)
-}
 
 fn run(manifest: &str) -> Result<(), String> {
     let text = std::fs::read_to_string(manifest).map_err(|e| format!("{manifest}: {e}"))?;
     let mut seen = HashSet::new();
     println!("set\tlabel\tname\ta\tb\tw");
     for line in text.lines() {
-        let f: Vec<&str> = line.split('\t').collect();
-        let [container, path, offset, len, origin] = f[..] else {
-            return Err(format!("bad line: {line}"));
-        };
+        let row = Row::parse(line).map_err(|e| e.to_string())?;
+        let (container, path, origin) = (row.container, row.path, row.origin);
         if container != "acm" && container != "wavc" {
             continue;
         }
         let lower = path.to_lowercase().replace('\\', "/");
-        let bytes = read(
-            path,
-            offset.parse().map_err(|e| format!("{line}: {e}"))?,
-            len.parse().map_err(|e| format!("{line}: {e}"))?,
-        )
-        .map_err(|e| format!("{path}: {e}"))?;
+        let bytes = row.read().map_err(|e| format!("{path}: {e}"))?;
         let mut h = DefaultHasher::new();
         bytes.hash(&mut h);
         if !seen.insert(h.finish()) {

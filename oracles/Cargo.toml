@@ -18,4 +18,6 @@ infinitier_datasource = "=0.0.14"
 ipsdoc = { path = ".." }
 
 [dev-dependencies]
+# The corpus tests read the manifest the corpus tool writes.
+corpus = { path = "../corpus" }
 infinitier_acm_encoder = "=0.0.14"
