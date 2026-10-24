@@ -692,7 +692,7 @@ fn check_grades_how_lip_files_follow_their_sounds() {
     let out = ipsdoc(&["check", "--msg", s(&d.path("dialog")), s(&d.path("x00.lip"))]);
     assert!(
         String::from_utf8_lossy(&out.stderr).contains(&format!(
-            "{}: warning: the lips close 0 times for the line's 4 m, b and p, 0 of them nearby: made for another line?\n",
+            "{}: warning: the lips close 0 times for the line's 4 m, b and p, 0 of them nearby\n",
             s(&d.path("x00.lip"))
         )),
         "{}",

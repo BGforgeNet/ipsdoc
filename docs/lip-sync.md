@@ -17,7 +17,9 @@
   shut-while-loud share, with a warning below 0.6 or above 35%. Fallout 2's own speech directories grade 0.64 to 0.82
   and 6 to 25%. `info` shows each file's figures.
 - **Against the words.** Given the lines' text (`check --msg dialog/`, a dialog file or a directory of them, English),
-  `check` also counts the closed-lips shapes against each line's m, b and p: Interplay's files close the lips once for
-  each. A lip file closing them under 0.67 or over 1.5 times as often, with under a quarter of the m, b and p met by a
-  closure near where they fall, gets a warning: it was likely made for another line. The directory grade adds the median
-  closures per m, b and p, with a warning outside 0.5 to 1.6 (Fallout 2's directories: 0.75 to 1.43).
+  `check` also counts the closed-lips shapes against each line's m, b and p, a run of them (the m b of "remember")
+  counted once: Interplay's files close the lips once for each. A lip file closing them under 0.67 or over 1.5 times as
+  often, with under a quarter of the m, b and p met by a closure near where they fall, gets a warning. That warns on 3%
+  of Fallout 2's own files, 2% of `ipsdoc lip --msg`'s, 28% of `ipsdoc lip`'s from the sound alone (which cannot know
+  the words), and 46% of lip files made for another line. The directory grade adds the median closures per m, b and p,
+  with a warning outside 0.5 to 1.6 (Fallout 2's directories: 0.75 to 1.50).

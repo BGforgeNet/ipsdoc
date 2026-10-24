@@ -40,14 +40,15 @@ const SET_ALIGNMENT: f64 = 0.6;
 /// ... or above this median share of the loud speech shown shut: Fallout 2's directories have 0.06 to 0.25, ours
 /// 0.06 to 0.08 per speaker, wav2lip's 0.77 to 0.92 ...
 const SET_SHUT: f64 = 0.35;
-/// ... or with a median of closures per m, b and p outside these: Fallout 2's directories have 0.75 to 1.43,
+/// ... or with a median of closures per m, b and p outside these: Fallout 2's directories have 0.75 to 1.50,
 /// wav2lip's 0 (it never closes the lips).
 const SET_CLOSURES: (f64, f64) = (0.5, 1.6);
 /// Interplay's lip files close the lips once per m, b or p of the text (the middle half of them exactly once); a
 /// lip file closing them at a ratio outside these ...
 const CLOSURES: (f64, f64) = (0.67, 1.5);
-/// ... with under this share of the m, b and p met by a closure nearby, fits another line: Interplay's 4%, another
-/// line's lip file stretched to fit 46%, wav2lip's all.
+/// ... with under this share of the m, b and p met by a closure nearby, misses the words: Interplay's 3%, ours from
+/// the text 2%, from the sound alone 28% (it cannot know them), another line's lip file stretched to fit 46%,
+/// wav2lip's all.
 const PLACED: f64 = 0.25;
 /// A closure meets an m, b or p within this many frames of where the sound falls with the line's phones spread
 /// evenly over its speech.
@@ -56,7 +57,7 @@ const NEAR_FRAMES: f64 = 20.0;
 /// How a lip file's closed lips fit its line's text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextFit {
-    /// The text's m, b and p.
+    /// The text's m, b and p, a run of them counted once (see `text_fit`).
     pub bilabials: usize,
     /// The lip file's closed-lips shapes in or beside speech.
     pub closures: usize,
@@ -131,7 +132,7 @@ impl fmt::Display for QualityProblem {
             }
             QualityProblem::Closures(t) => write!(
                 f,
-                "the lips close {} times for the line's {} m, b and p, {} of them nearby: made for another line?",
+                "the lips close {} times for the line's {} m, b and p, {} of them nearby",
                 t.closures, t.bilabials, t.placed
             ),
         }
@@ -332,7 +333,9 @@ pub fn quality(l: &Lip, audio: &Audio, text: Option<&[Token]>) -> Quality {
 }
 
 /// Closed-lips shapes (head frame 6) in or within 50 ms of speech, against the text's m, b and p, each placed where
-/// it falls with the line's phones spread evenly over `span`, the frames from the first speech to the last.
+/// it falls with the line's phones spread evenly over `span`, the frames from the first speech to the last. A run of
+/// them (the m b of "remember", the m b of "come back") is one closure, as the lips close once for it; a phrase
+/// break ends a run.
 fn text_fit(shown: &[u8], speaking: &[bool], span: (usize, usize), text: &[Token]) -> TextFit {
     let n = shown.len();
     let mut closures = Vec::new();
@@ -345,25 +348,42 @@ fn text_fit(shown: &[u8], speaking: &[bool], span: (usize, usize), text: &[Token
             start = i;
         }
     }
-    let phones: Vec<bool> = text
+    // Each phone (a vocal noise counts as one) and whether it is m, b or p; `None` for a phrase break.
+    let phones: Vec<Option<bool>> = text
         .iter()
-        .filter_map(|t| if let Token::Word(p) = t { Some(p) } else { None })
-        .flatten()
-        .map(|p| matches!(p.sound, Arpabet::M | Arpabet::B | Arpabet::P))
-        .collect();
-    let (from, to) = (span.0 as f64, span.1 as f64);
-    let each = (to - from) / phones.len().max(1) as f64;
-    let placed = phones
-        .iter()
-        .enumerate()
-        .filter(|&(i, &b)| {
-            b && closures
+        .flat_map(|t| match t {
+            Token::Word(p) => p
                 .iter()
-                .any(|&c| (c - (from + (i as f64 + 0.5) * each)).abs() <= NEAR_FRAMES)
+                .map(|p| Some(matches!(p.sound, Arpabet::M | Arpabet::B | Arpabet::P)))
+                .collect(),
+            Token::Noise => vec![Some(false)],
+            Token::Break => vec![None],
         })
+        .collect();
+    let slots = phones.iter().flatten().count();
+    let (from, to) = (span.0 as f64, span.1 as f64);
+    let each = (to - from) / slots.max(1) as f64;
+    // The runs, as the middle of each in phone slots.
+    let mut runs = Vec::new();
+    let (mut slot, mut run) = (0usize, None::<usize>);
+    for p in phones.iter().chain([None].iter()) {
+        match (p, run) {
+            (Some(true), None) => run = Some(slot),
+            (Some(true), Some(_)) => {}
+            (_, Some(first)) => {
+                runs.push((first + slot) as f64 / 2.0);
+                run = None;
+            }
+            _ => {}
+        }
+        slot += usize::from(p.is_some());
+    }
+    let placed = runs
+        .iter()
+        .filter(|&&r| closures.iter().any(|&c| (c - (from + r * each)).abs() <= NEAR_FRAMES))
         .count();
     TextFit {
-        bilabials: phones.iter().filter(|&&b| b).count(),
+        bilabials: runs.len(),
         closures: closures.len(),
         placed,
     }
@@ -405,6 +425,11 @@ mod tests {
     /// Three seconds at 22050 Hz: bursts of a tone 80 to 250 ms long, 40 to 150 ms apart, after a quarter second of
     /// silence; irregular, so no offset lines the bursts up again.
     fn speech() -> Audio {
+        talking().0
+    }
+
+    /// [`speech`], and the sample ranges of its bursts.
+    fn talking() -> (Audio, Vec<(usize, usize)>) {
         let rate = 22050;
         let mut seed = 0x2545_F491_4F6C_DD1Du64;
         let mut next = |lo: usize, hi: usize| {
@@ -413,15 +438,41 @@ mod tests {
             seed ^= seed << 17;
             lo + (seed % (hi - lo) as u64) as usize
         };
-        let mut samples = vec![0i16; rate / 4];
+        let (mut samples, mut bursts) = (vec![0i16; rate / 4], Vec::new());
         while samples.len() < 3 * rate - rate / 2 {
             let on = next(80, 250) * rate / 1000;
             let start = samples.len();
             samples.extend((0..on).map(|i| (12000.0 * ((start + i) as f64 * 0.04).sin()) as i16));
+            bursts.push((start, samples.len()));
             samples.extend(std::iter::repeat_n(0, next(40, 150) * rate / 1000));
         }
         samples.resize(3 * rate, 0);
-        Audio::from_i16(22050, 1, samples)
+        (Audio::from_i16(22050, 1, samples), bursts)
+    }
+
+    /// A lip file opening the mouth (head frame 3) over each burst, `late` samples after it, and shut between.
+    fn following(audio: &Audio, bursts: &[(usize, usize)], late: usize) -> Lip {
+        let last = 2 * audio.len() as i32;
+        let at = |s: usize| (2 * (s + late)).min(audio.len() * 2) as i32;
+        let (mut codes, mut markers) = (vec![0], vec![Marker { kind: 1, position: 0 }]);
+        for &(a, b) in bursts {
+            codes.extend([1, 0]);
+            markers.extend([
+                Marker {
+                    kind: 1,
+                    position: at(a),
+                },
+                Marker {
+                    kind: 1,
+                    position: at(b),
+                },
+            ]);
+        }
+        markers.push(Marker {
+            kind: 1,
+            position: last,
+        });
+        Lip::new("x", codes, markers)
     }
 
     fn whole(code: u8, audio: &Audio) -> Lip {
@@ -444,7 +495,7 @@ mod tests {
         let audio = speech();
         let q = quality(&generate("x", &audio, None, &Params::default()), &audio, None);
         assert!(q.shut_while_loud.unwrap() < 0.2, "{q:?}");
-        assert!(q.alignment.unwrap() > 0.8, "{q:?}");
+        assert!(q.alignment.unwrap() > SET_ALIGNMENT, "{q:?}");
         assert_eq!(q.problems(), []);
     }
 
@@ -458,13 +509,11 @@ mod tests {
 
     #[test]
     fn a_mouth_running_late_is_a_warning_naming_the_offset() {
-        let audio = speech();
-        let mut late = generate("x", &audio, None, &Params::default());
-        let (by, last) = (2 * 22050 / 4, late.last());
-        for m in &mut late.markers {
-            m.position = (m.position + by).min(last);
-        }
-        let q = quality(&late, &audio, None);
+        let (audio, bursts) = talking();
+        // In time: nothing to say.
+        assert_eq!(quality(&following(&audio, &bursts, 0), &audio, None).problems(), []);
+        // A quarter second late.
+        let q = quality(&following(&audio, &bursts, 22050 / 4), &audio, None);
         let [QualityProblem::Offset { ms }] = q.problems()[..] else {
             panic!("{q:?}")
         };
@@ -518,6 +567,11 @@ mod tests {
         }));
         assert!(fits(TextFit { bilabials: 0, ..t }));
         assert_eq!(quality(&whole(1, &audio), &audio, None).text, None);
+        // "Remember, come back": R IH M EH M B ER, K AH M B AE K. The m b of each closes the lips once, a phrase
+        // break or no.
+        let words = crate::g2p::tokens("Remember, come back.");
+        let fit = quality(&whole(1, &audio), &audio, Some(&words)).text.unwrap();
+        assert_eq!(fit.bilabials, 3);
     }
 
     #[test]
