@@ -37,6 +37,10 @@ pub struct Params {
     pub silence: f32,
     /// Shapes start this much before their sound, as the original lip files' do.
     pub lead: f32,
+    /// From the sound alone, a dip closes the lips only with at least this share of its energy under 1 kHz ...
+    pub closed_low: f32,
+    /// ... and at most this many zero crossings per sample (a hum, not a hiss); other dips show a tongue consonant.
+    pub closed_zcr: f32,
 }
 
 impl Default for Params {
@@ -44,11 +48,18 @@ impl Default for Params {
         Params {
             speech: SpeechParams::default(),
             duration_weight: 3.0,
-            hold: 0.05,
+            // Shorter than a 40 ms shape is a flicker; at 50 ms the sound-only shapes, with fewer closures, moved less
+            // than Interplay's (5.7 changes a second to its 6.8, tuning half), at 40 ms 6.5.
+            hold: 0.04,
             closed_hold: 0.04,
             max_rate: 8.0,
             silence: 0.25,
             lead: 0.03,
+            // Interplay closes the lips at a sixth of the dips, more often at a hum than a hiss. Closing at every dip
+            // gave 2.3 closures per run of m, b and p in the text; these give 1.0 (tuning half) and raise agreement
+            // (held-out 33.9% to 34.9%).
+            closed_low: 0.72,
+            closed_zcr: 0.05,
         }
     }
 }
@@ -60,7 +71,7 @@ pub fn generate(name: &str, audio: &Audio, tokens: Option<&[Token]>, p: &Params)
     let phrases = tokens.map(phrases).unwrap_or_default();
     let mut shapes = vec![Shape { start: 0.0, code: 0 }];
     if phrases.is_empty() {
-        audio_shapes(&a, &mut shapes);
+        audio_shapes(&a, p, &mut shapes);
     } else {
         text_shapes(&a, &phrases, p, &mut shapes);
     }
@@ -182,6 +193,41 @@ fn partition(sizes: &[f64], targets: &[f64]) -> Vec<usize> {
     ends
 }
 
+/// Stretches of speech shorter than this (frames) take no phrase of their own: a breath or a click took a whole
+/// phrase, its phones piled onto a few frames (5% of the phones of Fallout 2's lines had under 30 ms each).
+const MIN_UNIT: f64 = 15.0;
+
+/// The stretches of speech phrases are matched to: each stretch, a short one joined to its nearer neighbour.
+fn units(segs: &[(f64, f64)]) -> Vec<Vec<(f64, f64)>> {
+    let mut units: Vec<Vec<(f64, f64)>> = segs.iter().map(|&s| vec![s]).collect();
+    let length = |u: &[(f64, f64)]| u.iter().map(|&(s, e)| e - s).sum::<f64>();
+    while units.len() > 1 {
+        let Some(i) = (0..units.len())
+            .filter(|&i| length(&units[i]) < MIN_UNIT)
+            .min_by(|&x, &y| length(&units[x]).total_cmp(&length(&units[y])))
+        else {
+            break;
+        };
+        // The gap to each neighbour; the nearer one takes it.
+        let before = (i > 0).then(|| units[i][0].0 - units[i - 1].last().map_or(0.0, |s| s.1));
+        let after = units.get(i + 1).map(|n| n[0].0 - units[i].last().map_or(0.0, |s| s.1));
+        let into = match (before, after) {
+            (Some(b), Some(a)) if a < b => i + 1,
+            (_, None) | (Some(_), Some(_)) => i - 1,
+            (None, Some(_)) => i + 1,
+        };
+        let u = units.remove(i);
+        let into = if into > i { into - 1 } else { into };
+        if into < i {
+            units[into].extend(u);
+        } else {
+            let tail = std::mem::replace(&mut units[into], u);
+            units[into].extend(tail);
+        }
+    }
+    units
+}
+
 /// Phrases laid over speech: phrases matched to stretches of speech, phonemes aligned to each group's speech frames;
 /// silent mouth between matched groups and over long pauses inside one.
 fn text_shapes(a: &speech::Analysis, phrases: &[Vec<Word>], p: &Params, out: &mut Vec<Shape>) {
@@ -189,8 +235,9 @@ fn text_shapes(a: &speech::Analysis, phrases: &[Vec<Word>], p: &Params, out: &mu
     if segs.is_empty() {
         return;
     }
+    let segs = units(&segs);
     let pw: Vec<f64> = phrases.iter().map(|ph| ph.iter().map(Word::weight).sum()).collect();
-    let sd: Vec<f64> = segs.iter().map(|&(s, e)| e - s).collect();
+    let sd: Vec<f64> = segs.iter().map(|u| u.iter().map(|&(s, e)| e - s).sum()).collect();
     // Pairs of (phrase range, segment range).
     let mut pairs = Vec::new();
     if phrases.len() <= segs.len() {
@@ -208,7 +255,7 @@ fn text_shapes(a: &speech::Analysis, phrases: &[Vec<Word>], p: &Params, out: &mu
     }
     let silence = f64::from(p.silence) * f64::from(speech::FRAMES_PER_SECOND);
     for (prange, srange) in pairs {
-        let group = &segs[srange];
+        let group: Vec<(f64, f64)> = segs[srange].iter().flatten().copied().collect();
         let phones: Vec<(u8, f64)> = phrases[prange]
             .iter()
             .flatten()
@@ -334,9 +381,9 @@ fn align(phones: &[(u8, f64)], frames: &[usize], a: &speech::Analysis, p: &Param
 /// The span (dB) under the local peak that the alignment's loudness scale covers.
 const LOUDNESS_RANGE: f32 = 25.0;
 
-/// Shapes from the sound alone, frame by frame inside speech: closed lips at dips, a hiss shape for noisy frames,
-/// and openness by loudness under the stretch's peak.
-fn audio_shapes(a: &speech::Analysis, out: &mut Vec<Shape>) {
+/// Shapes from the sound alone, frame by frame inside speech: closed lips at humming dips, a tongue consonant at the
+/// other dips, a hiss shape for noisy frames, and openness by loudness under the stretch's peak.
+fn audio_shapes(a: &speech::Analysis, p: &Params, out: &mut Vec<Shape>) {
     const REACH: usize = 15;
     let side = |r: std::ops::Range<usize>| a.frames[r].iter().map(|x| x.db).fold(f32::MIN, f32::max);
     for s in &a.segments {
@@ -356,14 +403,18 @@ fn audio_shapes(a: &speech::Analysis, out: &mut Vec<Shape>) {
                 }
             })
             .collect();
-        // A consonant spans each syllable boundary: closed lips at a deep dip, a tongue consonant at a shallower one
-        // (SYLLABLE_DIP under both sides within 50 ms), over 30 ms either side.
+        // A consonant spans each syllable boundary, over 30 ms either side: closed lips at a deep dip that hums (see
+        // `Params::closed_low`), a tongue consonant at other deep dips and at shallower ones (SYLLABLE_DIP under both
+        // sides within 50 ms).
         for f in s.start + 1..s.end.saturating_sub(1) {
-            let d = a.frames[f].db;
-            let code = if a.dips.contains(&f) {
+            let fr = a.frames[f];
+            let d = fr.db;
+            let dip = a.dips.contains(&f);
+            let code = if dip && fr.low >= p.closed_low && fr.zcr <= p.closed_zcr {
                 32
-            } else if side(f.saturating_sub(5).max(s.start)..f) - d >= SYLLABLE_DIP
-                && side(f + 1..(f + 6).min(s.end)) - d >= SYLLABLE_DIP
+            } else if dip
+                || (side(f.saturating_sub(5).max(s.start)..f) - d >= SYLLABLE_DIP
+                    && side(f + 1..(f + 6).min(s.end)) - d >= SYLLABLE_DIP)
             {
                 19
             } else {
@@ -432,9 +483,15 @@ fn clean(mut shapes: Vec<Shape>, total: f64, a: &speech::Analysis, p: &Params) -
     let speech_secs: f64 = a.segments.iter().map(|s| (s.end - s.start) as f64).sum::<f64>() / fps;
     let allowed = (f64::from(p.max_rate) * speech_secs).ceil() as usize + 2;
     while changes(&v) > allowed && v.len() > 2 {
+        // Closed lips are the shortest shapes by design, and the one a viewer misses on m, b and p: others go first.
         let i = (1..v.len() - 1)
-            .filter(|&i| v[i].code != 0)
-            .min_by(|&x, &y| len(&v, x).total_cmp(&len(&v, y)));
+            .filter(|&i| v[i].code != 0 && v[i].frame() != CLOSED)
+            .min_by(|&x, &y| len(&v, x).total_cmp(&len(&v, y)))
+            .or_else(|| {
+                (1..v.len() - 1)
+                    .filter(|&i| v[i].code != 0)
+                    .min_by(|&x, &y| len(&v, x).total_cmp(&len(&v, y)))
+            });
         let Some(i) = i else { break };
         remove(&mut v, i, total);
     }
@@ -617,6 +674,54 @@ mod tests {
         check_valid(&lip, &audio);
         let changes = shapes(&lip).windows(2).filter(|w| w[0].0 != w[1].0).count();
         assert!(changes as f32 <= 8.0 * 1.2 + 2.0, "{changes} changes over 1.2 s");
+    }
+
+    #[test]
+    fn the_rate_cap_takes_closed_lips_last() {
+        // Two seconds of speech: shapes 70 ms long, but the closed lips 40 ms, the shortest; at most 2 changes a
+        // second, so the cap must drop most of them.
+        let frame = speech::Frame {
+            db: -20.0,
+            zcr: 0.1,
+            low: 0.5,
+        };
+        let a = speech::Analysis {
+            frames: vec![frame; 200],
+            segments: vec![speech::Segment { start: 0, end: 200 }],
+            dips: Vec::new(),
+        };
+        let mut shapes = vec![Shape { start: 0.0, code: 0 }];
+        let mut at = 10.0;
+        for k in 0..20 {
+            let code = if k == 10 {
+                32
+            } else if k % 2 == 0 {
+                1
+            } else {
+                13
+            };
+            shapes.push(Shape { start: at, code });
+            at += if code == 32 { 4.0 } else { 7.0 };
+        }
+        shapes.push(Shape { start: at, code: 0 });
+        let p = Params {
+            max_rate: 2.0,
+            ..Params::default()
+        };
+        let kept = clean(shapes, 200.0, &a, &p);
+        assert!(changes(&kept) <= 6, "{kept:?}");
+        assert!(kept.iter().any(|s| s.frame() == CLOSED), "{kept:?}");
+    }
+
+    #[test]
+    fn a_breath_beside_a_phrase_takes_no_phrase_of_its_own() {
+        // A 50 ms stretch 100 ms after one phrase and 500 ms before the next joins the first.
+        let joined = units(&[(0.0, 100.0), (110.0, 115.0), (165.0, 300.0)]);
+        assert_eq!(joined, [vec![(0.0, 100.0), (110.0, 115.0)], vec![(165.0, 300.0)]]);
+        // Nearer the next one, it joins that; long stretches stay apart.
+        let joined = units(&[(0.0, 100.0), (150.0, 155.0), (160.0, 300.0)]);
+        assert_eq!(joined, [vec![(0.0, 100.0)], vec![(150.0, 155.0), (160.0, 300.0)]]);
+        assert_eq!(units(&[(0.0, 5.0)]), [vec![(0.0, 5.0)]]);
     }
 
     #[test]
