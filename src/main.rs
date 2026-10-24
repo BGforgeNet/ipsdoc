@@ -111,10 +111,10 @@ struct ConvertArgs {
     #[arg(long)]
     rate: Option<NonZeroU32>,
     /// Read the input as having this many channels, whatever its header and content say.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "raw")]
     channels: Option<NonZeroU16>,
     /// Read the input as having this rate, whatever its header says.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "raw")]
     input_rate: Option<NonZeroU32>,
     /// Read the input as headerless PCM (see --raw-rate, --raw-channels, --raw-bits).
     #[arg(long)]

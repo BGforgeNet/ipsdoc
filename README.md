@@ -18,9 +18,9 @@ Also writes and checks Fallout's lip-sync files.
 
 `convert` options: `--to acm|wavc|wav|ogg` (otherwise from the output's extension), `--rate R` (resample),
 `--channels N` and `--input-rate R` (read the input as having these, whatever its header says), `--quality Q` (Vorbis,
--1 to 10, default 5), `--raw` with `--raw-rate`, `--raw-channels`, `--raw-bits` (headerless PCM), `--wrap` (see
-`docs/quirks.md`), `--full-depth` (a WAV keeps a depth beyond 16 bits; Infinity Engine games read WAV up to 16-bit).
-`ipsdoc --help` and `ipsdoc <command> --help` list everything.
+-1 to 10, default 5), `--raw` with `--raw-rate`, `--raw-channels`, `--raw-bits` (headerless PCM, instead of `--channels`
+and `--input-rate`), `--wrap` (see `docs/quirks.md`), `--full-depth` (a WAV keeps a depth beyond 16 bits; Infinity
+Engine games read WAV up to 16-bit). `ipsdoc --help` and `ipsdoc <command> --help` list everything.
 
 Exit status: 0 when everything succeeded, 1 when a file failed (did not read, decode, check or write), 2 for a request
 that cannot be carried out (bad options, an output that would overwrite the input).

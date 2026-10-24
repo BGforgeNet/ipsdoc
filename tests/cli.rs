@@ -251,6 +251,23 @@ fn reads_raw_pcm() {
 }
 
 #[test]
+fn raw_input_takes_its_rate_and_channels_from_the_raw_options_only() {
+    let d = Dir::new();
+    let (src, dst) = (d.path("a.raw"), d.path("a.acm"));
+    std::fs::write(&src, [0; 8]).unwrap();
+    for (flag, value) in [("--channels", "2"), ("--input-rate", "11025")] {
+        let out = ipsdoc(&["convert", s(&src), s(&dst), "--raw", flag, value]);
+        assert_eq!(out.status.code(), Some(2), "{flag}: {}", all_output(&out));
+        let text = all_output(&out);
+        assert!(
+            text.contains(&format!("'{flag} <")) && text.contains("'--raw'"),
+            "{text}"
+        );
+        assert!(!dst.exists(), "{flag} wrote an output");
+    }
+}
+
+#[test]
 fn refuses_zero_and_out_of_range_values_before_reading() {
     let d = Dir::new();
     let (wav, raw, dst) = (d.path("a.wav"), d.path("a.raw"), d.path("b.acm"));
