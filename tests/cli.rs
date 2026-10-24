@@ -296,6 +296,18 @@ fn check_goes_on_past_an_unreadable_directory() {
 
 #[cfg(unix)]
 #[test]
+fn check_reads_only_the_head_of_a_file_in_a_directory_that_is_no_sound() {
+    let d = Dir::new();
+    put(&d.path("good.acm"), &stereo(), OutputFormat::Acm);
+    // A sparse terabyte, as a game archive stands in a game directory: read whole, it could not even be held.
+    let archive = std::fs::File::create(d.path("data.bif")).unwrap();
+    archive.set_len(1 << 40).unwrap();
+    let text = ok(&ipsdoc(&["check", s(&d.0)]));
+    assert!(text.contains("1 sounds checked"), "{text}");
+}
+
+#[cfg(unix)]
+#[test]
 fn check_walks_a_tree_once_through_links_back_into_it() {
     let d = Dir::new();
     let sub = d.path("sub");

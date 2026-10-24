@@ -1,6 +1,7 @@
 //! `ipsdoc`: converts, inspects, checks and repairs Interplay ACM, WAVC and other game sound files.
 
 use std::collections::HashSet;
+use std::io::Read;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -8,7 +9,7 @@ use std::process::ExitCode;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use ipsdoc::acm::Overflow;
-use ipsdoc::detect::{Format, detect};
+use ipsdoc::detect::{self, Format, detect};
 use ipsdoc::input::{self, Note, Raw, RawBits, ReadOptions};
 use ipsdoc::lip::{self, Lip};
 use ipsdoc::output::{self, OutputFormat, WriteOptions};
@@ -379,6 +380,19 @@ fn files_under(path: &Path, walked: &mut HashSet<PathBuf>, out: &mut Vec<PathBuf
     }
 }
 
+/// The whole file, or `None` when its head shows neither a sound nor a lip file: a game directory holds archives of
+/// hundreds of megabytes, which are not read past their head.
+fn read_if_sound(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
+    let mut f = std::fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    (&mut f).take(detect::HEAD_LEN.max(lip::HEADER_LEN) as u64).read_to_end(&mut bytes)?;
+    if detect(&bytes) == Format::Other && !lip::looks_like(&bytes) {
+        return Ok(None);
+    }
+    f.read_to_end(&mut bytes)?;
+    Ok(Some(bytes))
+}
+
 fn check(paths: &[PathBuf]) -> Result<(), Failure> {
     let (mut checked, mut lips, mut failed) = (0u64, 0u64, 0u64);
     for p in paths {
@@ -390,8 +404,12 @@ fn check(paths: &[PathBuf]) -> Result<(), Failure> {
         }
         failed += errors.len() as u64;
         for f in files {
-            let bytes = match std::fs::read(&f) {
-                Ok(b) => b,
+            // Inside a directory only sounds and lip files are checked; a file named outright is checked whatever
+            // it is.
+            let read = if explicit { std::fs::read(&f).map(Some) } else { read_if_sound(&f) };
+            let bytes = match read {
+                Ok(Some(b)) => b,
+                Ok(None) => continue,
                 Err(e) => {
                     eprintln!("{}: {e}", f.display());
                     failed += 1;
@@ -403,11 +421,6 @@ fn check(paths: &[PathBuf]) -> Result<(), Failure> {
                 if !check_lip(&f, &bytes) {
                     failed += 1;
                 }
-                continue;
-            }
-            // Inside a directory only sounds and lip files are checked; a file named outright is checked whatever
-            // it is.
-            if !explicit && detect(&bytes) == Format::Other {
                 continue;
             }
             checked += 1;
