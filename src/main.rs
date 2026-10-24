@@ -143,7 +143,7 @@ struct LipArgs {
     /// Where to write, for a single sound.
     #[arg(short, long, conflicts_with = "rescale")]
     output: Option<PathBuf>,
-    /// A lip file to rescale in place, to fit the sound given with `--for` (replaces lipdoc).
+    /// A lip file to rescale in place, to fit the sound given with `--for`.
     #[arg(long, requires = "for_sound", conflicts_with = "sounds")]
     rescale: Option<PathBuf>,
     /// The sound `--rescale` fits the lip file to.
