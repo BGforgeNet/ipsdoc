@@ -335,6 +335,53 @@ fn repair_fixes_headers_in_place_and_dry_run_does_not() {
     assert_eq!(std::fs::read(&src).unwrap()[14..], original[14..]);
 }
 
+/// Runs ipsdoc with stdout and stderr on pipes whose readers are gone, as after `| head -1`: every write fails.
+fn ipsdoc_into_closed_pipes(args: &[&str]) -> std::process::ExitStatus {
+    let (out_reader, out_writer) = std::io::pipe().unwrap();
+    let (err_reader, err_writer) = std::io::pipe().unwrap();
+    drop((out_reader, err_reader));
+    Command::new(env!("CARGO_BIN_EXE_ipsdoc"))
+        .args(args)
+        .stdout(out_writer)
+        .stderr(err_writer)
+        .status()
+        .unwrap()
+}
+
+#[test]
+fn a_closed_pipe_drops_the_output_and_the_work_goes_on() {
+    let d = Dir::new();
+    let (good, bad, wrong) = (d.path("good.acm"), d.path("bad.acm"), d.path("wrong.acm"));
+    put(&good, &stereo(), OutputFormat::Acm);
+    std::fs::write(&bad, &std::fs::read(&good).unwrap()[..300]).unwrap();
+    std::fs::write(&wrong, ipsdoc::acm::encode(&[1, 2, 3], 2, 22050).unwrap()).unwrap();
+    // The exit status stays what it would be: 1, for the file that does not read.
+    assert_eq!(ipsdoc_into_closed_pipes(&["info", s(&good), s(&bad)]).code(), Some(1));
+    assert_eq!(ipsdoc_into_closed_pipes(&["check", s(&d.0)]).code(), Some(1));
+    assert_eq!(ipsdoc_into_closed_pipes(&["repair", s(&wrong)]).code(), Some(0));
+    let h = ipsdoc::acm::Header::parse(&std::fs::read(&wrong).unwrap()).unwrap();
+    assert_eq!(h.channels, 1);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn output_that_cannot_be_written_is_a_failure() {
+    let d = Dir::new();
+    let good = d.path("good.acm");
+    put(&good, &stereo(), OutputFormat::Acm);
+    // Every write to /dev/full fails as on a full disk.
+    let out = Command::new(env!("CARGO_BIN_EXE_ipsdoc"))
+        .args(["info", s(&good)])
+        .stdout(std::fs::File::create("/dev/full").unwrap())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "ipsdoc: writing output: No space left on device (os error 28)\n"
+    );
+}
+
 #[test]
 fn info_and_repair_go_on_past_a_bad_file() {
     let d = Dir::new();
