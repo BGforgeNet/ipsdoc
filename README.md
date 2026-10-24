@@ -97,7 +97,8 @@ How lip files are written and checked: `docs/lip-sync.md`.
 
 ### Installing
 
-Download the binary from the releases page and run it from anywhere.
+Download the archive for your system from the [releases page](https://github.com/BGforgeNet/ipsdoc/releases) and run the
+binary in it from anywhere.
 
 To build it instead: `docs/building.md`.
 
