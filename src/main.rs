@@ -122,7 +122,7 @@ struct ConvertArgs {
     #[arg(long, value_enum, default_value = "16", requires = "raw")]
     raw_bits: RawBitsArg,
     /// Vorbis quality, -1 to 10.
-    #[arg(long, default_value_t = 5.0, value_parser = vorbis_quality)]
+    #[arg(long, default_value_t = 5.0, value_parser = vorbis_quality, allow_negative_numbers = true)]
     quality: f32,
     /// Wrap ACM samples beyond 16 bits as the engines do (an audible click), instead of clamping them.
     #[arg(long)]

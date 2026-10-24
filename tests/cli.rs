@@ -173,20 +173,33 @@ fn refuses_zero_and_out_of_range_values_before_reading() {
     let (wav, raw, dst) = (d.path("a.wav"), d.path("a.raw"), d.path("b.acm"));
     put(&wav, &stereo(), OutputFormat::Riff);
     std::fs::write(&raw, [0; 4]).unwrap();
-    for args in [
-        &[s(&wav), s(&dst), "--rate", "0"][..],
-        &[s(&wav), s(&dst), "--channels", "0"],
-        &[s(&wav), s(&dst), "--input-rate", "0"],
-        &[s(&wav), s(&dst), "--quality", "11"],
-        &[s(&wav), s(&dst), "--quality", "-1.5"],
-        &[s(&raw), s(&dst), "--raw", "--raw-rate", "0"],
-        &[s(&raw), s(&dst), "--raw", "--raw-channels", "0"],
-        &[s(&raw), s(&dst), "--raw", "--raw-bits", "12"],
+    for (input, flag, value) in [
+        (&wav, "--rate", "0"),
+        (&wav, "--channels", "0"),
+        (&wav, "--input-rate", "0"),
+        (&wav, "--quality", "11"),
+        (&wav, "--quality", "-1.5"),
+        (&raw, "--raw-rate", "0"),
+        (&raw, "--raw-channels", "0"),
+        (&raw, "--raw-bits", "12"),
     ] {
-        let out = ipsdoc(&[&["convert"], args].concat());
-        assert_eq!(out.status.code(), Some(2), "{args:?}: {}", all_output(&out));
-        assert!(!dst.exists(), "{args:?} wrote an output");
+        let raw_flag: &[&str] = if input == &raw { &["--raw"] } else { &[] };
+        let out = ipsdoc(&[&["convert", s(input), s(&dst)], raw_flag, &[flag, value]].concat());
+        assert_eq!(out.status.code(), Some(2), "{flag} {value}: {}", all_output(&out));
+        // Refused as a value of its option, not as some other error.
+        let text = all_output(&out);
+        assert!(text.contains(&format!("invalid value '{value}' for '{flag}")), "{text}");
+        assert!(!dst.exists(), "{flag} {value} wrote an output");
     }
+}
+
+#[test]
+fn converts_at_a_negative_vorbis_quality() {
+    let d = Dir::new();
+    let (wav, ogg) = (d.path("a.wav"), d.path("a.ogg"));
+    put(&wav, &stereo(), OutputFormat::Riff);
+    ok(&ipsdoc(&["convert", s(&wav), s(&ogg), "--quality", "-1"]));
+    assert_eq!(load(&ogg).channels, 2);
 }
 
 #[test]
