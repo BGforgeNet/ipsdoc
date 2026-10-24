@@ -5,7 +5,7 @@
 //! the line. A position is a byte offset into the sound's decoded 16-bit data, all channels interleaved: 2 x a sample
 //! index, whatever rate or channel count the sound plays at.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::pcm::Audio;
 
@@ -357,10 +357,14 @@ impl Lip {
     }
 
     /// The sound the game plays with this lip file, read from `path`: the ACM its name field names, beside it (the
-    /// name as stored or in lower case, `.acm` or `.ACM`). `None` when the name is empty or no such file exists.
+    /// name as stored or in lower case, `.acm` or `.ACM`). `None` when the name is empty or a path (`../x`, `/x`), or
+    /// no such file exists.
     pub fn sound_beside(&self, path: &Path) -> Option<PathBuf> {
         let name = self.name();
-        if name.is_empty() {
+        if !matches!(
+            Path::new(&name).components().collect::<Vec<_>>().as_slice(),
+            [Component::Normal(_)]
+        ) {
             return None;
         }
         let dir = path.parent().unwrap_or(Path::new("."));

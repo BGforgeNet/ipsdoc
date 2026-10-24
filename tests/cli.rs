@@ -852,6 +852,19 @@ fn check_counts_a_lip_files_sound_once_as_a_sound_and_fails_it_for_both() {
 }
 
 #[test]
+fn a_lip_file_names_a_sound_beside_it_never_one_elsewhere() {
+    use ipsdoc::lip::{Lip, Marker};
+    let d = Dir::new();
+    std::fs::create_dir(d.path("sub")).unwrap();
+    put(&d.path("x.acm"), &speech(), OutputFormat::Acm);
+    let lip = d.path("sub").join("a.lip");
+    let markers = vec![Marker { kind: 1, position: 0 }, Marker { kind: 1, position: 2 }];
+    std::fs::write(&lip, Lip::new("../x", vec![0], markers).to_bytes()).unwrap();
+    let text = ok(&ipsdoc(&["info", s(&lip)]));
+    assert!(text.contains("no sound ../X beside it"), "{text}");
+}
+
+#[test]
 fn check_fits_the_sound_the_name_field_names() {
     let d = Dir::new();
     let (a, b) = (d.path("a.acm"), d.path("b.acm"));
