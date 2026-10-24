@@ -66,7 +66,7 @@ pub struct Analysis {
 
 /// The audio frame where 10 ms frame `f` starts: `round(f * rate / 100)`, exact over any length (220.5 audio frames
 /// per frame at 22050 Hz would drift by 22 ms over ten seconds if rounded once).
-fn frame_start(f: usize, rate: u32) -> usize {
+pub fn frame_start(f: usize, rate: u32) -> usize {
     let per = u64::from(FRAMES_PER_SECOND);
     ((f as u64 * u64::from(rate) + per / 2) / per) as usize
 }

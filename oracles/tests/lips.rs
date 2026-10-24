@@ -25,7 +25,8 @@ use std::path::{Path, PathBuf};
 use ipsdoc::g2p::tokens;
 use ipsdoc::input::{ReadOptions, read};
 use ipsdoc::lip::{self, Lip};
-use ipsdoc::lipgen::{HEAD_FRAME, Params, generate};
+use ipsdoc::lipgen::{Params, generate};
+use ipsdoc::lipqual::head_frames;
 use ipsdoc::pcm::Audio;
 
 #[derive(Default)]
@@ -74,25 +75,6 @@ impl Score {
         self.holds.sort_unstable();
         f64::from(self.holds.get(self.holds.len() / 2).copied().unwrap_or(0) * 10)
     }
-}
-
-/// Head frame per 10 ms frame.
-fn series(l: &Lip, n: usize, at: &impl Fn(usize) -> usize) -> Vec<u8> {
-    let mut out = Vec::with_capacity(n);
-    let mut m = 0;
-    for f in 0..n {
-        let pos = 2 * at(f) as i32;
-        while m + 1 < l.markers.len() && l.markers[m + 1].position <= pos {
-            m += 1;
-        }
-        let code = l.phonemes.get(m).copied().unwrap_or(0);
-        out.push(if code < lip::PHONEME_COUNT {
-            HEAD_FRAME[usize::from(code)]
-        } else {
-            0
-        });
-    }
-    out
 }
 
 fn env_dir(key: &str) -> PathBuf {
@@ -201,11 +183,11 @@ fn score_half(dirs: &[PathBuf], text: &HashMap<String, String>, wav2lip: &Path, 
         sorted.sort_by(f32::total_cmp);
         let top = sorted[((sorted.len() as f32 - 1.0) * 0.95) as usize];
         let loud: Vec<bool> = db.iter().map(|&d| d > top - 15.0).collect();
-        let r = series(&original, n, &at);
+        let r = head_frames(&original, &audio, n);
         h.original.add(&r, &r, &loud);
-        h.text.add(&series(&ours_text, n, &at), &r, &loud);
-        h.audio.add(&series(&ours_audio, n, &at), &r, &loud);
-        h.wav2lip.add(&series(&w2l, n, &at), &r, &loud);
+        h.text.add(&head_frames(&ours_text, &audio, n), &r, &loud);
+        h.audio.add(&head_frames(&ours_audio, &audio, n), &r, &loud);
+        h.wav2lip.add(&head_frames(&w2l, &audio, n), &r, &loud);
     }
     h
 }

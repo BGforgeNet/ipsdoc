@@ -12,7 +12,7 @@
 //!
 //! Lip sync: [`msg`] finds a voiced line's text, [`g2p`] turns it into phonemes, [`speech`] finds where the sound
 //! speaks, and [`lipgen`] aligns the two (or works from the sound alone) into a [`lip::Lip`], the file format [`lip`]
-//! reads, writes and checks.
+//! reads, writes and checks; [`lipqual`] judges how well one follows its sound.
 //!
 //! The binaries print through [`print`](mod@print), which survives a closed pipe.
 
@@ -23,6 +23,7 @@ pub mod g2p;
 pub mod input;
 pub mod lip;
 pub mod lipgen;
+pub mod lipqual;
 pub mod msg;
 pub mod output;
 pub mod pcm;

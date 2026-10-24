@@ -1,6 +1,6 @@
 //! `ipsdoc`: converts, inspects, checks and repairs Interplay ACM, WAVC and other game sound files.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::io::Read;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::path::{Path, PathBuf};
@@ -17,7 +17,7 @@ use ipsdoc::pcm::Audio;
 use ipsdoc::repair::{self, Field};
 // Pipe-safe: std's panic once a reader has gone (`ipsdoc info *.acm | head -1`).
 use ipsdoc::{eprintln, println};
-use ipsdoc::{g2p, lipgen, msg};
+use ipsdoc::{g2p, lipgen, lipqual, msg};
 
 /// Converts, inspects, checks and repairs Interplay ACM, WAVC and other game sound files.
 ///
@@ -424,6 +424,8 @@ fn read_if_sound(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
 
 fn check(paths: &[PathBuf]) -> Result<(), Failure> {
     let (mut checked, mut lips, mut failed) = (0u64, 0u64, 0u64);
+    // Alignment per directory: a set of lip files is graded together, where chance evens out.
+    let mut sets: BTreeMap<PathBuf, Vec<lipqual::Quality>> = BTreeMap::new();
     for p in paths {
         let explicit = !p.is_dir();
         let (mut files, mut errors) = (Vec::new(), Vec::new());
@@ -451,8 +453,12 @@ fn check(paths: &[PathBuf]) -> Result<(), Failure> {
             };
             if lip::looks_like(&bytes) {
                 lips += 1;
-                if !check_lip(&f, &bytes) {
-                    failed += 1;
+                let (ok, quality) = check_lip(&f, &bytes);
+                failed += u64::from(!ok);
+                if let Some(q) = quality {
+                    sets.entry(f.parent().unwrap_or(Path::new("")).to_path_buf())
+                        .or_default()
+                        .push(q);
                 }
                 continue;
             }
@@ -461,6 +467,19 @@ fn check(paths: &[PathBuf]) -> Result<(), Failure> {
                 eprintln!("{}: {}", f.display(), chain(&e));
                 failed += 1;
             }
+        }
+    }
+    for (dir, files) in &sets {
+        let Some(g) = lipqual::grade(files) else { continue };
+        let alignment = g.alignment.map_or("not judged".to_owned(), |a| format!("{a:.2}"));
+        println!(
+            "{}: lip sync of {} lip files (medians): alignment {alignment}, mouth shut through {:.0}% of the loud speech",
+            dir.display(),
+            g.files,
+            100.0 * g.shut
+        );
+        for p in g.problems() {
+            eprintln!("{}: warning: {p}", dir.display());
         }
     }
     println!("{checked} sounds checked, {lips} lip files checked, {failed} failed");
@@ -584,6 +603,7 @@ fn lip_info(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
         l.markers.len(),
         l.last()
     );
+    let mut problems = Vec::new();
     match named_sound(path, &l) {
         Ok(Some((acm, audio))) => {
             let secs = audio.frames() as f64 / f64::from(audio.rate);
@@ -593,23 +613,39 @@ fn lip_info(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
                 lip::Fit::Off { ms } => format!("ends {}", off_by(ms, "it")),
             };
             println!("  sound {}: {secs:.3} s; the lip file {fit}", acm.display());
+            let q = lipqual::quality(&l, &audio);
+            match (q.alignment, q.shut_while_loud) {
+                (Some(a), Some(s)) => println!(
+                    "  sync: alignment {a:.2} (0.5 is chance), mouth shut through {:.0}% of the loud speech",
+                    100.0 * s
+                ),
+                _ => println!(
+                    "  sync: not judged (no speech, codes the game misreads, or a mouth that never opens or never \
+                     shuts in speech)"
+                ),
+            }
+            problems.extend(q.problems().iter().map(|p| (label(p.severity()), p.to_string())));
         }
         Ok(None) => println!("  no sound {} beside it", l.name()),
         Err(e) => println!("  sound unreadable: {e}"),
     }
     for p in l.validate(Some(&base_name(path))) {
-        println!("  {}: {p}", label(p.severity()));
+        problems.push((label(p.severity()), p.to_string()));
+    }
+    for (severity, p) in problems {
+        println!("  {severity}: {p}");
     }
     Ok(())
 }
 
-/// Checks a lip file on its own and against the sound beside it; reports and returns whether it passes.
-fn check_lip(path: &Path, bytes: &[u8]) -> bool {
+/// Checks a lip file on its own and against the sound beside it; reports and returns whether it passes, and how well
+/// it follows the sound when that was judged.
+fn check_lip(path: &Path, bytes: &[u8]) -> (bool, Option<lipqual::Quality>) {
     let l = match Lip::parse(bytes) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("{}: {e}", path.display());
-            return false;
+            return (false, None);
         }
     };
     let mut ok = true;
@@ -633,6 +669,7 @@ fn check_lip(path: &Path, bytes: &[u8]) -> bool {
             None
         }
     };
+    let mut quality = None;
     if let Some((acm, audio)) = sound {
         let fit = lip::fit(l.last(), &audio);
         match (fit, fit.severity()) {
@@ -656,8 +693,17 @@ fn check_lip(path: &Path, bytes: &[u8]) -> bool {
                 ok &= s != lip::Severity::Error;
             }
         }
+        // A lip file made for another length places its shapes by another sound: judging them here says nothing.
+        if fit.severity() != Some(lip::Severity::Error) {
+            let q = lipqual::quality(&l, &audio);
+            for p in q.problems() {
+                eprintln!("{}: {}: {p}", path.display(), label(p.severity()));
+                ok &= p.severity() != lip::Severity::Error;
+            }
+            quality = Some(q);
+        }
     }
-    ok
+    (ok, quality)
 }
 
 /// `100 ms after <what>`, `20 ms before <what>`.

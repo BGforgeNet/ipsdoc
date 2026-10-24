@@ -610,6 +610,81 @@ fn lip_rescale_fits_a_lip_to_another_sound() {
     assert_eq!(d.files(), ["big.acm", "x.acm", "x.lip"]);
 }
 
+/// Three seconds of tone bursts 80 to 250 ms long with pauses between, irregular as syllables are.
+fn talk() -> Audio {
+    let spans = [
+        (120, 60),
+        (230, 90),
+        (90, 140),
+        (180, 50),
+        (250, 110),
+        (100, 70),
+        (160, 130),
+        (210, 40),
+        (80, 100),
+        (140, 60),
+    ];
+    let mut samples = vec![0i16; 22050 / 4];
+    for (on, off) in spans {
+        let start = samples.len();
+        samples.extend((0..on * 2205 / 100).map(|i| (12000.0 * ((start + i) as f64 * 0.04).sin()) as i16));
+        samples.extend(std::iter::repeat_n(0, off * 2205 / 100));
+    }
+    samples.resize(3 * 22050, 0);
+    Audio::from_i16(22050, 1, samples)
+}
+
+#[test]
+fn check_grades_how_lip_files_follow_their_sounds() {
+    let d = Dir::new();
+    let sounds: Vec<PathBuf> = (0..15).map(|i| d.path(&format!("x{i:02}.acm"))).collect();
+    for s in &sounds {
+        put(s, &talk(), OutputFormat::Acm);
+    }
+    let names: Vec<&str> = sounds.iter().map(|p| s(p)).collect();
+    ok(&ipsdoc(&[&["lip"][..], &names].concat()));
+    // Made from their sounds: graded as a set, and nothing to say.
+    let out = ipsdoc(&["check", s(&d.0)]);
+    let text = ok(&out);
+    assert!(
+        text.contains(": lip sync of 15 lip files (medians): alignment 0."),
+        "{text}"
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stderr), "");
+    let info = ok(&ipsdoc(&["info", s(&d.path("x00.lip"))]));
+    assert!(info.contains("  sync: alignment 0."), "{info}");
+    // A mouth that never opens: an error for each, and the set warned about.
+    for s in &sounds {
+        let last = 2 * 3 * 22050;
+        let shut = ipsdoc::lip::Lip::new(
+            &s.file_stem().unwrap().to_string_lossy(),
+            vec![0],
+            vec![
+                ipsdoc::lip::Marker { kind: 1, position: 0 },
+                ipsdoc::lip::Marker {
+                    kind: 1,
+                    position: last,
+                },
+            ],
+        );
+        std::fs::write(s.with_extension("lip"), shut.to_bytes()).unwrap();
+    }
+    let out = ipsdoc(&["check", s(&d.0)]);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains(&format!(
+            "{}: error: the mouth is shut through 100% of the loud speech\n",
+            s(&d.path("x00.lip"))
+        )),
+        "{err}"
+    );
+    assert!(
+        err.contains("warning: its lip files keep the mouth shut through 100% of the loud speech (median), over 35%"),
+        "{err}"
+    );
+}
+
 #[test]
 fn check_compares_a_lip_with_its_sound() {
     let d = Dir::new();
