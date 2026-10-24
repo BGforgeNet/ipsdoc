@@ -1,7 +1,8 @@
 //! ACM decoding, sample for sample as the engines decode (the Fallout 2 engine and GemRB), except that a sample
 //! beyond 16 bits is clamped by default where the engines wrap it ([`Overflow`]). Where they would read undefined
 //! data (an invalid filler, a code outside a filler's table, a dequantisation entry the block never set), decoding
-//! fails with the position instead.
+//! fails with the position instead. A header whose sample count no real stream's input could carry
+//! ([`MAX_SAMPLES_PER_BIT`]) is refused before anything is decoded.
 
 use super::bitreader::BitReader;
 pub use super::header::{Header, HeaderError};
