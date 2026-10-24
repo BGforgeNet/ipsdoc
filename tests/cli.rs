@@ -131,6 +131,19 @@ fn converting_over_an_existing_output_says_so() {
 }
 
 #[test]
+fn a_failed_conversion_keeps_the_output_it_would_replace() {
+    let d = Dir::new();
+    let (src, dst) = (d.path("music.acm"), d.path("music.wav"));
+    put(&src, &stereo(), OutputFormat::Acm);
+    std::fs::write(&dst, "earlier").unwrap();
+    // The write goes through a sibling file first; a directory in its place makes that write fail.
+    std::fs::create_dir(d.path("music.wav.ipsdoc-tmp")).unwrap();
+    let out = ipsdoc(&[s(&src), s(&dst)]);
+    assert_eq!(out.status.code(), Some(1), "{}", all_output(&out));
+    assert_eq!(std::fs::read(&dst).unwrap(), b"earlier");
+}
+
+#[test]
 fn refuses_to_write_over_its_input() {
     let d = Dir::new();
     let src = d.path("a.wav");

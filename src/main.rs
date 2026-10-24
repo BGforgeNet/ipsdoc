@@ -268,7 +268,7 @@ fn convert(a: &ConvertArgs) -> Result<(), Failure> {
     let out = output::write(&audio, format, &write_opts)
         .map_err(|e| fail(1, format!("{}: {}", output.display(), chain(&e))))?;
     let replaced = output.exists();
-    std::fs::write(&output, out).map_err(|e| fail(1, format!("{}: {e}", output.display())))?;
+    replace_file(&output, &out).map_err(|e| fail(1, format!("{}: {e}", output.display())))?;
     if replaced {
         println!("{}: replaced", output.display());
     }
