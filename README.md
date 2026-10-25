@@ -6,10 +6,10 @@ as RIFF WAV and Ogg Vorbis files.
 Also writes and checks Fallout's lip-sync files.
 
 - [Commands](#commands)
-  - [`ipsdoc convert`](#ipsdoc-convert)
-  - [`ipsdoc info`, `ipsdoc check`](#ipsdoc-info-ipsdoc-check)
-  - [`ipsdoc repair`](#ipsdoc-repair)
-  - [`ipsdoc lip`](#ipsdoc-lip)
+  - [info, check](#info-check)
+  - [convert](#convert)
+  - [repair](#repair)
+  - [lip](#lip)
 - [Examples](#examples)
   - [Convert](#convert)
   - [Infinity Engine](#infinity-engine)
@@ -24,7 +24,7 @@ Also writes and checks Fallout's lip-sync files.
 
 `ipsdoc --help` and `ipsdoc <command> --help` list every option.
 
-#### `ipsdoc convert`
+#### convert
 
 `ipsdoc convert IN [OUT]`, or `ipsdoc IN [OUT]`: converts between ACM, WAVC, WAV and Ogg Vorbis.
 
@@ -37,7 +37,7 @@ Also writes and checks Fallout's lip-sync files.
 - `--wrap`: see `docs/quirks.md`.
 - `--full-depth`: a WAV keeps a depth beyond 16 bits; Infinity Engine games read WAV up to 16-bit.
 
-#### `ipsdoc info`, `ipsdoc check`
+#### info, check
 
 `ipsdoc info FILE...`: shows a file's headers, how it reads, and what in them is wrong.
 
@@ -45,7 +45,7 @@ Also writes and checks Fallout's lip-sync files.
 
 - `--msg DIALOG`: dialog `.msg` files or directories of them, to judge lip files against each line's words.
 
-#### `ipsdoc repair`
+#### repair
 
 `ipsdoc repair FILE...`: fixes wrong header fields in place, without re-encoding.
 
@@ -53,7 +53,7 @@ Also writes and checks Fallout's lip-sync files.
   cannot tell an ACM's rate; a lip file named with them fails.
 - `--dry-run`: show the fixes without writing them.
 
-#### `ipsdoc lip`
+#### lip
 
 `ipsdoc lip SOUND...`: writes Fallout lip-sync files, from each line's text or from the sound alone.
 
