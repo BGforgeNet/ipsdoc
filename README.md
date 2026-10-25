@@ -13,7 +13,6 @@ Also writes and checks Fallout's lip-sync files.
   - [lip](#lip)
 - [Formats](#formats)
 - [Installing](#installing)
-- [Licence](#licence)
 
 ### Commands
 
@@ -157,8 +156,3 @@ Download the archive for your system from the [releases page](https://github.com
 binary in it from anywhere.
 
 Or [build it from source](docs/building.md).
-
-### Licence
-
-[GNU General Public License, version 3](LICENSE). Release archives include the notices of the software it contains
-(`THIRD-PARTY-NOTICES.txt`).
