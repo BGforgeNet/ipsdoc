@@ -196,6 +196,15 @@ pub fn align(tokens: &[Token], a: &Analysis, weight: f64) -> Vec<Placed> {
     let mut cost = vec![vec![f64::INFINITY; n + 1]; k + 1];
     let mut from = vec![vec![usize::MAX; n + 1]; k + 1];
     cost[0][0] = 0.0;
+    // The fewest frames units u.. fill. Ending unit u-1 later than n - after[u] leaves the rest no room, and starting
+    // unit u earlier than the units before it fill is unreachable (infinite cost): neither bears on the result, so the
+    // search leaves both out.
+    let fewest = |u: &Unit| if matches!(u, Unit::Sound { .. }) { MIN_SOUND } else { 0 };
+    let mut after = vec![0; k + 1];
+    for (ui, u) in units.iter().enumerate().rev() {
+        after[ui] = after[ui + 1] + fewest(u);
+    }
+    let mut reached = 0;
     for (ui, u) in units.iter().enumerate() {
         let sums = fit[class(u)].as_deref().unwrap_or_default();
         let (shortest, longest, extra, skip) = match *u {
@@ -213,8 +222,8 @@ pub fn align(tokens: &[Token], a: &Analysis, weight: f64) -> Vec<Placed> {
             if skip {
                 (best, arg) = (cost[ui][j], j);
             }
-            if j >= shortest {
-                for i in j.saturating_sub(longest)..=j - shortest {
+            if j >= shortest && j + after[ui + 1] <= n {
+                for i in j.saturating_sub(longest).max(reached)..=j - shortest {
                     let c = cost[ui][i] + (sums[j] - sums[i]) + length[j - i] + extra;
                     if c < best {
                         (best, arg) = (c, i);
@@ -224,6 +233,7 @@ pub fn align(tokens: &[Token], a: &Analysis, weight: f64) -> Vec<Placed> {
             cost[ui + 1][j] = best;
             from[ui + 1][j] = arg;
         }
+        reached += fewest(u);
     }
     let mut out = Vec::new();
     let mut j = n;
