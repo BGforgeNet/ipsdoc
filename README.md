@@ -39,9 +39,6 @@ line's words. `lip` takes `--msg FILE`, the dialog file holding each sound's lin
 beside the sound, else the sound alone), and `-o LIP` for a single sound. `ipsdoc --help` and `ipsdoc <command> --help`
 list everything.
 
-Exit status: 0 when everything succeeded, 1 when a file failed (did not read, decode, check or write), 2 for a request
-that cannot be carried out (bad options, an output that would overwrite the input).
-
 ### Examples
 
 #### Convert
@@ -99,14 +96,6 @@ $ ipsdoc check bg1npc
 
 $ ipsdoc check music
 375 sounds checked, 0 lip files checked, 0 failed
-```
-
-A high-quality music pack puts 44.1 kHz audio under the game's 22050 Hz headers. The samples cannot tell the rate, so it
-is set in place, the stream left as it is:
-
-```console
-$ ipsdoc repair --rate 44100 music/BC1/BC1A1.acm
-music/BC1/BC1A1.acm: ACM rate 22050 -> 44100
 ```
 
 #### Inspect and repair
