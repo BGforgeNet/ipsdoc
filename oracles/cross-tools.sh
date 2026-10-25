@@ -18,12 +18,14 @@ if [ $# -gt 0 ]; then
     mkdir -p "$dir/acmtools" "$dir/acmtools-decoded"
     for wav in "$dir"/fixtures/*.wav; do
         name=$(basename "$wav" .wav)
-        # AcmTools guesses channels from the duration; the fixture names say them.
+        # AcmTools guesses channels from the duration, and resamples to 22050 Hz (through FFmpeg) unless told the
+        # rate; the fixture names say both.
         case $name in
         *-stereo-*) channels=stereo ;;
         *) channels=mono ;;
         esac
-        "$@" to-acm "$wav" "$dir/acmtools/$name.acm" --channels "$channels"
+        rate=${name##*-}
+        "$@" to-acm "$wav" "$dir/acmtools/$name.acm" --channels "$channels" --rate "$rate"
         "$@" to-audio "$dir/ours/$name.acm" "$dir/acmtools-decoded/$name.wav" --channels "$channels"
     done
 fi
