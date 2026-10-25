@@ -41,5 +41,13 @@ fn a_relative_source_skips_the_extract_dir_inside_it_and_lists_absolute_paths() 
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let manifest = std::fs::read_to_string(d.0.join("m.tsv")).unwrap();
     let paths: Vec<&str> = manifest.lines().map(|l| l.split('\t').nth(1).unwrap()).collect();
-    assert_eq!(paths, [d.0.join("s/a.acm").to_str().unwrap()]);
+    // The listed path is the working directory as the system reports it joined with the source, so it is compared
+    // as a file: a macOS temp directory resolves through a symlink, and Windows joins with its own separator.
+    assert_eq!(paths.len(), 1, "{paths:?}");
+    let listed = Path::new(paths[0]);
+    assert!(listed.is_absolute(), "{listed:?}");
+    assert_eq!(
+        listed.canonicalize().unwrap(),
+        d.0.join("s").join("a.acm").canonicalize().unwrap()
+    );
 }
