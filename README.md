@@ -12,7 +12,7 @@ Also writes and checks Fallout's lip-sync files.
 | `ipsdoc IN [OUT]`, `ipsdoc convert IN [OUT]` | Converts. Without `OUT`: an ACM or WAVC becomes a `.wav`, anything else an `.acm`, beside the input (a WAVC already named `.wav` needs an `OUT`). An ACM or WAVC converted to ACM or WAVC keeps its stream, under a new header, unless its samples change. It names an output it replaces.                                                                      |
 | `ipsdoc info FILE... [--msg DIALOG]`         | Shows the headers, how the file reads, and which header fields are wrong; for a lip file, how well it follows its sound (and its line's words, with `--msg`).                                                                                                                                                                                                   |
 | `ipsdoc check PATH... [--msg DIALOG]`        | Decodes each file named and, in directories (recursively), every ACM, WAVC, RIFF and Ogg file, and checks the lip files among them; fails if any does not decode, or a lip file is broken, visibly out of time with the ACM beside it, or keeps the mouth shut while it speaks; grades the lip sync of each directory with 15 or more lip files it could judge. |
-| `ipsdoc repair [--dry-run] FILE...`          | Fixes wrong ACM and WAVC header fields, and lip files' length fields, in place, without re-encoding.                                                                                                                                                                                                                                                            |
+| `ipsdoc repair [--dry-run] FILE...`          | Fixes wrong ACM and WAVC header fields, and lip files' length fields, in place, without re-encoding; sets an ACM's rate or channel count to one given (`--rate`, `--channels`).                                                                                                                                                                                 |
 | `ipsdoc lip SOUND... [--msg FILE] [-o LIP]`  | Writes a Fallout lip-sync file beside each speech sound (or to `-o`, for a single sound), from its line in the dialog `.msg` given (a sound it has no line for fails); without `--msg`, from a `.txt` transcript beside it, else from the sound alone; it names each lip file it replaces.                                                                      |
 | `ipsdoc lip --rescale LIP --for SOUND`       | Rescales a lip file to another sound (another rate or channel count of the same recording).                                                                                                                                                                                                                                                                     |
 
@@ -20,8 +20,11 @@ Also writes and checks Fallout's lip-sync files.
 `--channels N` and `--input-rate R` (read the input as having these, whatever its header says; the samples stay as they
 are), `--quality Q` (Vorbis, -1 to 10, default 5), `--raw` with `--raw-rate`, `--raw-channels`, `--raw-bits` (headerless
 PCM, instead of `--channels` and `--input-rate`), `--wrap` (see `docs/quirks.md`), `--full-depth` (a WAV keeps a depth
-beyond 16 bits; Infinity Engine games read WAV up to 16-bit). `ipsdoc --help` and `ipsdoc <command> --help` list
-everything.
+beyond 16 bits; Infinity Engine games read WAV up to 16-bit).
+
+`repair` options: `--rate R` and `--channels N` (store these in each ACM and WAVC header named, over what the content
+says, as the samples cannot tell an ACM's rate; a lip file named with them fails), `--dry-run`. `ipsdoc --help` and
+`ipsdoc <command> --help` list everything.
 
 Exit status: 0 when everything succeeded, 1 when a file failed (did not read, decode, check or write), 2 for a request
 that cannot be carried out (bad options, an output that would overwrite the input).
@@ -111,6 +114,13 @@ myn1003a.acm: ACM channels 2 -> 1 (dry run)
 
 $ ipsdoc repair myn1003a.acm
 myn1003a.acm: ACM channels 2 -> 1
+```
+
+Music holding 44.1 kHz audio under a 22050 Hz header, which no content check can tell:
+
+```console
+$ ipsdoc repair --rate 44100 mx0000a.acm
+mx0000a.acm: ACM rate 22050 -> 44100
 ```
 
 #### Check a directory

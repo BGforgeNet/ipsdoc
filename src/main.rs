@@ -65,6 +65,12 @@ enum Command {
         /// Show the fixes without writing them.
         #[arg(long)]
         dry_run: bool,
+        /// Set the ACM rate (and a WAVC's) to this: the samples cannot tell it.
+        #[arg(long)]
+        rate: Option<NonZeroU16>,
+        /// Set the ACM channel count (and a WAVC's) to this, whatever the content says.
+        #[arg(long)]
+        channels: Option<NonZeroU16>,
         /// Files to repair.
         #[arg(required = true)]
         files: Vec<PathBuf>,
@@ -342,6 +348,7 @@ fn describe(n: &Note) -> String {
 fn field_name(f: Field) -> &'static str {
     match f {
         Field::AcmChannels => "ACM channels",
+        Field::AcmRate => "ACM rate",
         Field::WavcChannels => "WAVC channels",
         Field::WavcRate => "WAVC rate",
         Field::WavcUncompressed => "WAVC uncompressed size",
@@ -579,7 +586,18 @@ fn check(paths: &[PathBuf], msgs: &[PathBuf]) -> Result<(), Failure> {
     }
 }
 
-fn repair_files(files: &[PathBuf], dry_run: bool) -> Result<(), Failure> {
+/// `ipsdoc repair`; a `rate` or `channels` given is stored in each ACM and WAVC header, over what reading establishes.
+fn repair_files(
+    files: &[PathBuf],
+    dry_run: bool,
+    rate: Option<NonZeroU16>,
+    channels: Option<NonZeroU16>,
+) -> Result<(), Failure> {
+    let opts = ReadOptions {
+        rate: rate.map(NonZeroU32::from),
+        channels,
+        ..ReadOptions::default()
+    };
     let mut failed = 0;
     for f in files {
         let bytes = match read_file(f) {
@@ -590,14 +608,19 @@ fn repair_files(files: &[PathBuf], dry_run: bool) -> Result<(), Failure> {
                 continue;
             }
         };
-        // A lip file's other problems are reported, not repaired.
-        let found = if lip::looks_like(&bytes) {
+        // A lip file's other problems are reported, not repaired; it has no rate or channel count to set, and is left
+        // whole rather than given its length fix alone, as the request was for something else.
+        let found = if lip::looks_like(&bytes) && (rate.is_some() || channels.is_some()) {
+            Err("a lip file has no rate or channel count to set".to_owned())
+        } else if lip::looks_like(&bytes) {
             Lip::parse(&bytes).map_err(|e| e.to_string()).map(|l| {
                 let kept = l.validate(Some(&base_name(f)));
                 (repair::lip(&l), kept)
             })
         } else {
-            repair::fixes(&bytes).map_err(|e| chain(&e)).map(|r| (r, Vec::new()))
+            repair::fixes(&bytes, &opts)
+                .map_err(|e| chain(&e))
+                .map(|r| (r, Vec::new()))
         };
         let (r, kept) = match found {
             Ok(x) => x,
@@ -980,7 +1003,15 @@ fn main() -> ExitCode {
         (Some(Command::Convert(a)), _) | (None, Some(a)) => convert(a),
         (Some(Command::Info { files, msg }), _) => info_files(files, msg),
         (Some(Command::Check { paths, msg }), _) => check(paths, msg),
-        (Some(Command::Repair { dry_run, files }), _) => repair_files(files, *dry_run),
+        (
+            Some(Command::Repair {
+                dry_run,
+                rate,
+                channels,
+                files,
+            }),
+            _,
+        ) => repair_files(files, *dry_run, *rate, *channels),
         (Some(Command::Lip(a)), _) => lip_files(a),
         (None, None) => Err(fail(2, "nothing to do; see --help")),
     };

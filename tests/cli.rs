@@ -554,6 +554,82 @@ fn repair_fixes_headers_in_place_and_dry_run_does_not() {
     assert_eq!(std::fs::read(&src).unwrap()[14..], original[14..]);
 }
 
+#[test]
+fn repair_sets_a_given_rate_and_channel_count_and_nothing_else() {
+    let d = Dir::new();
+    let src = d.path("music.acm");
+    let original = foreign_acm(&stereo().to_i16(), 2, 22050);
+    std::fs::write(&src, &original).unwrap();
+    let dry = ok(&ipsdoc(&["repair", "--dry-run", "--rate", "44100", s(&src)]));
+    assert_eq!(dry, format!("{}: ACM rate 22050 -> 44100 (dry run)\n", s(&src)));
+    same_bytes(&std::fs::read(&src).unwrap(), &original);
+    let real = ok(&ipsdoc(&["repair", "--rate", "44100", s(&src)]));
+    assert_eq!(real, format!("{}: ACM rate 22050 -> 44100\n", s(&src)));
+    let mut want = original.clone();
+    want[10..12].copy_from_slice(&44100u16.to_le_bytes());
+    same_bytes(&std::fs::read(&src).unwrap(), &want);
+    // A given channel count stands over the content's, which reads as stereo here.
+    ok(&ipsdoc(&["repair", "--channels", "1", s(&src)]));
+    want[8..10].copy_from_slice(&1u16.to_le_bytes());
+    same_bytes(&std::fs::read(&src).unwrap(), &want);
+    // A WAVC gets both headers set.
+    let wavc = d.path("sound.wav");
+    let mut want = ipsdoc::wavc::wrap(&original).unwrap();
+    std::fs::write(&wavc, &want).unwrap();
+    let out = ok(&ipsdoc(&["repair", "--rate", "11025", "--channels", "1", s(&wavc)]));
+    let w = s(&wavc);
+    assert_eq!(
+        out,
+        format!(
+            "{w}: WAVC channels 2 -> 1\n{w}: WAVC rate 22050 -> 11025\n{w}: ACM channels 2 -> 1\n{w}: ACM rate 22050 -> \
+             11025\n"
+        )
+    );
+    want[0x14..0x16].copy_from_slice(&1u16.to_le_bytes());
+    want[0x18..0x1A].copy_from_slice(&11025u16.to_le_bytes());
+    want[28 + 8..28 + 10].copy_from_slice(&1u16.to_le_bytes());
+    want[28 + 10..28 + 12].copy_from_slice(&11025u16.to_le_bytes());
+    same_bytes(&std::fs::read(&wavc).unwrap(), &want);
+}
+
+#[test]
+fn repair_refuses_a_rate_or_channel_count_it_cannot_set() {
+    let d = Dir::new();
+    let (acm, wav, lip) = (d.path("a.acm"), d.path("b.wav"), d.path("c.lip"));
+    let original = foreign_acm(&stereo().to_i16(), 2, 22050);
+    std::fs::write(&acm, &original).unwrap();
+    for (flag, value) in [("--rate", "0"), ("--channels", "0"), ("--rate", "65536")] {
+        let out = ipsdoc(&["repair", flag, value, s(&acm)]);
+        assert_eq!(out.status.code(), Some(2), "{flag} {value}: {}", all_output(&out));
+        let text = all_output(&out);
+        assert!(text.contains(&format!("invalid value '{value}' for '{flag}")), "{text}");
+        same_bytes(&std::fs::read(&acm).unwrap(), &original);
+    }
+    // A lip file has no rate or channel count, and RIFF headers are not repaired; the ACM named with them still is.
+    put(&wav, &stereo(), OutputFormat::Riff);
+    let at = |position| ipsdoc::lip::Marker { kind: 1, position };
+    let l = ipsdoc::lip::Lip::new("c", vec![0], vec![at(0), at(400)]).to_bytes();
+    std::fs::write(&lip, &l).unwrap();
+    let riff = std::fs::read(&wav).unwrap();
+    let out = ipsdoc(&["repair", "--rate", "44100", s(&lip), s(&wav), s(&acm)]);
+    assert_eq!(out.status.code(), Some(1), "{}", all_output(&out));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        format!(
+            "{}: a lip file has no rate or channel count to set\n{}: only ACM and WAVC headers are repaired\nipsdoc: 2 \
+             not repaired\n",
+            s(&lip),
+            s(&wav)
+        )
+    );
+    assert_eq!(std::fs::read(&lip).unwrap(), l);
+    assert_eq!(std::fs::read(&wav).unwrap(), riff);
+    assert_eq!(
+        ipsdoc::acm::Header::parse(&std::fs::read(&acm).unwrap()).unwrap().rate,
+        44100
+    );
+}
+
 /// Runs ipsdoc with stdout and stderr on pipes whose readers are gone, as after `| head -1`: every write fails.
 fn ipsdoc_into_closed_pipes(args: &[&str]) -> std::process::ExitStatus {
     let (out_reader, out_writer) = std::io::pipe().unwrap();

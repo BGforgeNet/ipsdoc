@@ -1,7 +1,7 @@
 //! Header fields an ACM, WAVC or lip file gets wrong, and their correction in place: no re-encoding, the bitstream
 //! and the markers untouched. For a sound the correct values are what reading establishes (`input::read`): the
-//! channel count the content supports, and WAVC sizes and fields that match the ACM inside. For a lip file, its length
-//! field is its last marker; nothing else in it is repaired.
+//! channel count the content supports, or the rate and channel count the reader is given, and WAVC sizes and fields
+//! that match the ACM inside. For a lip file, its length field is its last marker; nothing else in it is repaired.
 
 use std::fs::OpenOptions;
 use std::io::{self, Seek, SeekFrom, Write};
@@ -16,6 +16,8 @@ use crate::{acm, detect, wavc};
 pub enum Field {
     /// The ACM header's channel count.
     AcmChannels,
+    /// The ACM header's rate.
+    AcmRate,
     /// The WAVC header's channel count.
     WavcChannels,
     /// The WAVC header's rate.
@@ -68,32 +70,38 @@ pub enum RepairError {
     /// The file does not read.
     #[error("unreadable")]
     Input(#[from] InputError),
+    /// The rate to store is beyond the ACM header's 16-bit field.
+    #[error("an ACM header cannot hold a rate of {rate} Hz (at most 65535)")]
+    AcmRate {
+        /// The rate.
+        rate: u32,
+    },
 }
 
-/// What an ACM or WAVC needs.
+/// What an ACM or WAVC needs, read with `opts`: a rate or channel count they give is the one to store.
 ///
 /// # Errors
 ///
-/// When the file is neither ACM nor WAVC, or does not read.
-pub fn fixes(bytes: &[u8]) -> Result<Repair, RepairError> {
+/// When the file is neither ACM nor WAVC, does not read, or the rate given does not fit an ACM header.
+pub fn fixes(bytes: &[u8], opts: &ReadOptions) -> Result<Repair, RepairError> {
     if !matches!(detect::detect(bytes), detect::Format::Acm | detect::Format::Wavc) {
         return Err(RepairError::NotRepairable);
     }
-    fixes_read(bytes, &input::read(bytes, &ReadOptions::default())?)
+    fixes_read(bytes, &input::read(bytes, opts)?)
 }
 
-/// [`fixes`] for a file already read: `loaded` is `bytes` as [`input::read`] reads them with default
-/// [`ReadOptions`], whose channel count is the one to store.
+/// [`fixes`] for a file already read: `loaded` is `bytes` as [`input::read`] reads them, whose channel count and rate
+/// are the ones to store.
 ///
 /// # Errors
 ///
-/// When the file is neither ACM nor WAVC, or its headers do not read.
+/// When the file is neither ACM nor WAVC, its headers do not read, or `loaded`'s rate does not fit an ACM header.
 pub fn fixes_read(bytes: &[u8], loaded: &input::Loaded) -> Result<Repair, RepairError> {
     let format = loaded.format;
     if !matches!(format, detect::Format::Acm | detect::Format::Wavc) {
         return Err(RepairError::NotRepairable);
     }
-    let channels = loaded.audio.channels;
+    let (channels, rate) = (loaded.audio.channels, loaded.audio.rate);
     let wavc_header = match format {
         detect::Format::Wavc => Some(wavc::Header::parse(bytes).map_err(InputError::from)?),
         detect::Format::Acm | detect::Format::Riff | detect::Format::Ogg | detect::Format::Other => None,
@@ -105,7 +113,7 @@ pub fn fixes_read(bytes: &[u8], loaded: &input::Loaded) -> Result<Repair, Repair
     let a = acm::Header::parse(inner)
         .map_err(acm::DecodeError::from)
         .map_err(InputError::from)?;
-    let correct_acm = acm::Header { channels, ..a };
+    let correct_acm = a.relabelled(channels, rate).ok_or(RepairError::AcmRate { rate })?;
     // Each header as it should be, the fields reading cannot establish kept as stored.
     let headers = wavc_header.map(|w| {
         let correct = wavc::Header {
@@ -133,6 +141,7 @@ pub fn fixes_read(bytes: &[u8], loaded: &input::Loaded) -> Result<Repair, Repair
         check(Field::WavcBits, w.bits.into(), c.bits.into());
     }
     check(Field::AcmChannels, a.channels.into(), correct_acm.channels.into());
+    check(Field::AcmRate, a.rate.into(), correct_acm.rate.into());
     let mut patches = Vec::new();
     if let Some((w, c)) = headers
         && c != w
@@ -187,6 +196,11 @@ pub fn write(path: &Path, patches: &[Patch]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What a file needs, read with default options.
+    fn fixes(bytes: &[u8]) -> Result<Repair, RepairError> {
+        super::fixes(bytes, &ReadOptions::default())
+    }
 
     fn patched(bytes: &[u8], r: &Repair) -> Vec<u8> {
         let mut b = bytes.to_vec();
@@ -282,6 +296,29 @@ mod tests {
         assert_eq!(r.patches.len(), 1);
         assert_eq!(r.patches[0].at, crate::wavc::Header::LEN);
         assert_eq!(fixes(&patched(&b, &r)).unwrap(), Repair::default());
+    }
+
+    #[test]
+    fn stores_a_rate_given_and_refuses_one_an_acm_header_cannot_hold() {
+        let b = acm::encode(&[1, -1, 2, -2], 1, 22050).unwrap();
+        let given = |rate| ReadOptions {
+            rate: std::num::NonZeroU32::new(rate),
+            ..ReadOptions::default()
+        };
+        let r = super::fixes(&b, &given(44100)).unwrap();
+        assert_eq!(
+            r.fixes,
+            [Fix {
+                field: Field::AcmRate,
+                stored: 22050,
+                correct: 44100
+            }]
+        );
+        assert_eq!(acm::Header::parse(&patched(&b, &r)).unwrap().rate, 44100);
+        assert!(matches!(
+            super::fixes(&b, &given(65536)),
+            Err(RepairError::AcmRate { rate: 65536 })
+        ));
     }
 
     #[test]

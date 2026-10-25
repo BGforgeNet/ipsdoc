@@ -5,5 +5,5 @@ use ipsdoc::input::{ReadOptions, read};
 
 libfuzzer_sys::fuzz_target!(|data: &[u8]| {
     let _ = read(data, &ReadOptions::default());
-    let _ = ipsdoc::repair::fixes(data);
+    let _ = ipsdoc::repair::fixes(data, &ReadOptions::default());
 });

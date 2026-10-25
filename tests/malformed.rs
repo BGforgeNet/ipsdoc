@@ -58,7 +58,7 @@ fn read_all(bytes: &[u8]) {
     let _ = wavc::Header::parse(bytes);
     let _ = wavc::acm_of(bytes).map(acm::decode);
     let _ = read(bytes, &ReadOptions::default());
-    let _ = repair::fixes(bytes);
+    let _ = repair::fixes(bytes, &ReadOptions::default());
     if let Ok(l) = Lip::parse(bytes) {
         let _ = l.validate(Some("x"));
     }
