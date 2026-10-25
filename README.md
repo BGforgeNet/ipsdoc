@@ -1,7 +1,7 @@
 ## Interplay sound doctor
 
-Converts, inspects, checks and repairs the sound files of Infinity Engine games and Fallout 1 and 2: ACM, WAVC, and the
-RIFF WAV and Ogg Vorbis files their mods use.
+Converts, inspects, checks and repairs the sound files of Infinity Engine games and Fallout 1 and 2: ACM, WAVC, as well
+as RIFF WAV and Ogg Vorbis files.
 
 Also writes and checks Fallout's lip-sync files.
 
