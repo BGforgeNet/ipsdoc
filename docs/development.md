@@ -61,7 +61,8 @@ decoder reads our lossless files exactly. The fixtures come from `cargo run -p o
 ## Lip sync quality
 
 `oracles/tests/lips.rs` scores `ipsdoc lip` (with the line's text, and from the sound alone) and wav2lip against Fallout
-2's own lip files, and asserts on half the speakers, the half `lipgen::Params` is not tuned on. It reads:
+2's own lip files, and asserts on the held-out half of the speakers (`oracles/tests/speakers`), which the lip model is
+not fitted to and `lipgen::Params` not tuned on. It reads:
 
 - `IPSDOC_LIPS`: `sound/speech` from Fallout 2's `master.dat` (`dat3 x master.dat 'sound/speech/*'`), a directory per
   speaker with each line's ACM and LIP.
@@ -87,9 +88,9 @@ IPSDOC_LIPS=... IPSDOC_MSG=... IPSDOC_LIPS_WAV2LIP=... cargo test --release -p o
 ```
 
 `src/lipalign/model.rs`, the model `ipsdoc lip` places a line's sounds with, is fitted by `oracles/tests/lipmodel.rs` to
-forced alignments of the same lines, which fails and prints the table when the committed one differs. `IPSDOC_MFA` holds
-the alignments: one TextGrid per line, `<speaker>/<line>.TextGrid`, from the Montreal Forced Aligner 3.4 with its
-`english_us_arpa` acoustic model, dictionary and G2P model
+forced alignments of the tuning half's lines, which fails and prints the table when the committed one differs.
+`IPSDOC_MFA` holds the alignments: one TextGrid per line, `<speaker>/<line>.TextGrid`, from the Montreal Forced Aligner
+3.4 with its `english_us_arpa` acoustic model, dictionary and G2P model
 (`mfa align --g2p_model_path english_us_arpa <corpus> english_us_arpa english_us_arpa <out>`), over each line's sound as
 a WAV beside its text: the transcript beside the sound where there is one, else its dialog text, a vocal noise (a cough,
 a laugh) written `[noise]`.

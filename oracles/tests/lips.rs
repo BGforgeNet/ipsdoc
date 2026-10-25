@@ -3,8 +3,8 @@
 //!
 //! Measures: agreement (share of frames showing the original's head frame; higher is better); loud frames, within
 //! 15 dB of the line's 95th-percentile level, shown silent (lower); changes per second and median hold, as distance
-//! from the original's (lower). Speaker directories sorted by name alternate between a tuning half (even), used to
-//! choose `lipgen::Params`, and a held-out half (odd), the only one asserted on.
+//! from the original's (lower). Asserts on the held-out half of the speakers only, which neither the lip model nor
+//! `lipgen::Params` saw (`speakers::halves`).
 //!
 //! Run with `--ignored` and `IPSDOC_LIPS=<dir>` (`sound/speech` extracted from `master.dat`: a directory per speaker
 //! holding each line's ACM and LIP), `IPSDOC_MSG=<dir>` (the English `data/text/english/dialog` of the Unofficial
@@ -28,6 +28,8 @@ use ipsdoc::lip::{self, Lip};
 use ipsdoc::lipgen::{Params, generate};
 use ipsdoc::lipqual::head_frames;
 use ipsdoc::pcm::Audio;
+
+mod speakers;
 
 #[derive(Default)]
 struct Score {
@@ -217,17 +219,10 @@ fn lip_sync_beats_wav2lip() {
     let text = voiced_lines(&env_dir("IPSDOC_MSG"));
     let wav2lip = env_dir("IPSDOC_LIPS_WAV2LIP");
     let limit = std::env::var("IPSDOC_LIPS_LIMIT").map_or(usize::MAX, |v| v.parse().expect("IPSDOC_LIPS_LIMIT"));
-    let mut dirs: Vec<PathBuf> = std::fs::read_dir(&speech)
-        .unwrap()
-        .map(|d| d.unwrap().path())
-        .filter(|p| p.is_dir())
-        .collect();
-    dirs.sort();
-    let (tune, held): (Vec<_>, Vec<_>) = dirs.into_iter().enumerate().partition(|(i, _)| i % 2 == 0);
-    let strip = |v: Vec<(usize, PathBuf)>| v.into_iter().map(|(_, d)| d).collect::<Vec<_>>();
-    let mut t = score_half(&strip(tune), &text, &wav2lip, limit);
+    let (tune, held) = speakers::halves(&speech);
+    let mut t = score_half(&tune, &text, &wav2lip, limit);
     print_table("tuning half", &mut t);
-    let mut h = score_half(&strip(held), &text, &wav2lip, limit);
+    let mut h = score_half(&held, &text, &wav2lip, limit);
     print_table("held-out half", &mut h);
     assert!(
         t.failures.is_empty() && h.failures.is_empty(),
@@ -263,7 +258,8 @@ fn lip_sync_beats_wav2lip() {
         assert!(hl < w2l_hold, "{who}: hold off by {hl} ms vs wav2lip {w2l_hold}");
     }
     // No text-against-audio bound on loud frames shown silent: m, b and p placed from the words close the lips in
-    // voiced speech, and Interplay's own files show 3% where both of ours show under 1%, so lower is not better there.
+    // voiced speech, as in Interplay's own files (3%; ours from the words 3.5 to 4.5%, from the sound under 1%), so
+    // lower is not better there.
     assert!(
         h.text.agreement() > h.audio.agreement(),
         "text {} vs audio {}",

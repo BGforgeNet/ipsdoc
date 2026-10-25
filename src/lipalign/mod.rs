@@ -463,8 +463,12 @@ mod tests {
             .concat(),
         );
         let placed = spans(&align(&tokens("us"), &a, 16.0));
+        // All of that speech is unscripted, ending to a frame where it does; the stretch may start in the silence
+        // before it, as silence fits the model's broad silence class about as well either way.
         assert!(
-            placed.iter().any(|p| near(&[*p], &[(What::Unscripted, 20, 220)])),
+            placed
+                .iter()
+                .any(|&(what, start, end)| what == What::Unscripted && start <= 21 && end.abs_diff(220) <= 1),
             "{placed:?}"
         );
         assert!(
