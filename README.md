@@ -32,7 +32,7 @@ that cannot be carried out (bad options, an output that would overwrite the inpu
 ### Examples
 
 - [Convert](#convert)
-- [Infinity Engine mods](#infinity-engine-mods)
+- [Infinity Engine](#infinity-engine)
 - [Inspect and repair](#inspect-and-repair)
 - [Check a directory](#check-a-directory)
 - [Lip sync](#lip-sync)
@@ -51,12 +51,9 @@ ipsdoc --quality 8 myn1003a.acm myn1003a.ogg
 
 # Resample to 44100 Hz
 ipsdoc --rate 44100 myn1003a.acm myn1003a-44k.acm
-
-# 44.1 kHz music under a 22050 Hz header: the same stream, its header saying 44100 Hz
-ipsdoc --input-rate 44100 mx0000a.acm fixed/mx0000a.acm
 ```
 
-#### Infinity Engine mods
+#### Infinity Engine
 
 The classic games read WAV and WAVC; the Enhanced Editions also read Ogg Vorbis under a `.wav` name. A mod that ships
 Ogg Vorbis decodes it for a classic game when it installs:
@@ -97,6 +94,14 @@ $ ipsdoc check music
 375 sounds checked, 0 lip files checked, 0 failed
 ```
 
+A high-quality music pack puts 44.1 kHz audio under the game's 22050 Hz headers. The samples cannot tell the rate, so it
+is set in place, the stream left as it is:
+
+```console
+$ ipsdoc repair --rate 44100 music/BC1/BC1A1.acm
+music/BC1/BC1A1.acm: ACM rate 22050 -> 44100
+```
+
 #### Inspect and repair
 
 A Fallout 2 speech file whose header claims stereo:
@@ -114,13 +119,6 @@ myn1003a.acm: ACM channels 2 -> 1 (dry run)
 
 $ ipsdoc repair myn1003a.acm
 myn1003a.acm: ACM channels 2 -> 1
-```
-
-Music holding 44.1 kHz audio under a 22050 Hz header, which no content check can tell:
-
-```console
-$ ipsdoc repair --rate 44100 mx0000a.acm
-mx0000a.acm: ACM rate 22050 -> 44100
 ```
 
 #### Check a directory
