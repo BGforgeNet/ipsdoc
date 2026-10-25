@@ -37,18 +37,13 @@ pub enum Verdict {
 impl Features {
     /// The features of `samples` read as stereo frames; `None` with fewer than two frames.
     pub fn of(samples: &[i16]) -> Option<Features> {
-        let frames: Vec<[f64; 2]> = samples
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|&[l, r]| [f64::from(l), f64::from(r)])
-            .collect();
+        let frames = samples.as_chunks::<2>().0;
         if frames.len() < 2 {
             return None;
         }
         let (mut a, mut b, mut w) = (0.0, 0.0, 0.0);
         for pair in frames.windows(2) {
-            let ([l, r], [l1, r1]) = (pair[0], pair[1]);
+            let [[l, r], [l1, r1]] = [pair[0], pair[1]].map(|f| f.map(f64::from));
             a += (r - l).abs();
             b += (l1 - r).abs();
             w += ((l1 - l).abs() + (r1 - r).abs()) / 2.0;
