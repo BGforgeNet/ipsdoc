@@ -534,10 +534,11 @@ fn check(paths: &[PathBuf], msgs: &[PathBuf]) -> Result<(), Failure> {
         .concat();
         println!(
             "{}: lip sync of {} lip files (medians): alignment {alignment}, mouth shut through {:.0}% of the loud \
-             speech{more}",
+             speech ({:.0}% closed lips){more}",
             dir.display(),
             g.files,
-            100.0 * g.shut
+            100.0 * g.shut,
+            100.0 * g.closed
         );
         for p in g.problems() {
             eprintln!("{}: warning: {p}", dir.display());
@@ -699,25 +700,34 @@ fn lip_info(path: &Path, bytes: &[u8], entries: Option<&[msg::Entry]>) -> Result
 
 /// `info`'s figures for how a lip file follows its sound.
 fn print_quality(q: &lipqual::Quality) {
-    match (q.alignment, q.shut_while_loud) {
-        (Some(a), Some(s)) => println!(
-            "  sync: alignment {a:.2} (0.5 is chance), mouth shut through {:.0}% of the loud speech",
-            100.0 * s
+    match (q.alignment, q.shut_while_loud, q.closed_while_loud) {
+        (Some(a), Some(s), Some(c)) => println!(
+            "  sync: alignment {a:.2} (0.5 is chance), mouth shut through {:.0}% of the loud speech ({:.0}% closed \
+             lips)",
+            100.0 * s,
+            100.0 * c
         ),
         _ => println!(
-            "  sync: not judged (no speech, codes the game misreads, or a mouth that never opens or never shuts in \
-             speech)"
+            "  sync: not judged (no speech, codes the game misreads, or a mouth that is never open, or never at rest, \
+             in speech)"
         ),
     }
     if let Some(o) = q.openness {
         println!("  width: how wide the mouth opens follows the loudness at rank correlation {o:.2} (0 is chance)");
     }
-    for (offset, band) in [(q.offset, "150 to 300"), (q.far_offset, "310 to 600")] {
-        if let Some((a, ms)) = offset {
-            let side = if ms < 0.0 { "early" } else { "late" };
+    for (offset, band) in [
+        (q.offset, "60 to 300 ms late or 130 to 300 ms early"),
+        (q.far_offset, "310 to 600 ms off"),
+    ] {
+        if let Some(o) = offset {
+            let side = if o.ms < 0.0 { "early" } else { "late" };
+            let chance = o
+                .chance
+                .map_or(String::new(), |c| format!(" (shuffled copies reach {c:.2})"));
             println!(
-                "  offset: best alignment {band} ms off is {a:.2}, {:.0} ms {side}",
-                ms.abs()
+                "  offset: best alignment {band} is {:.2}, {:.0} ms {side}{chance}",
+                o.alignment,
+                o.ms.abs()
             );
         }
     }
@@ -726,6 +736,12 @@ fn print_quality(q: &lipqual::Quality) {
     }
     if let Some(m) = q.movement {
         println!("  movement: {m:.1} shape changes a second of speech");
+    }
+    if let Some(h) = q.longest_hold {
+        println!(
+            "  hold: one shape held through at most {:.0} ms of unbroken speech",
+            1000.0 * h
+        );
     }
     if let Some(t) = q.text {
         println!("  words: {t}");

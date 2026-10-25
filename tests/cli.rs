@@ -681,7 +681,9 @@ fn check_grades_how_lip_files_follow_their_sounds() {
         "{text}"
     );
     assert!(
-        text.contains("% of the loud speech, width 0.") && text.contains(", mouth open through 0% of the quiet, "),
+        text.contains("% of the loud speech (")
+            && text.contains("% closed lips), width 0.")
+            && text.contains(", mouth open through 0% of the quiet, "),
         "{text}"
     );
     assert_eq!(String::from_utf8_lossy(&out.stderr), "");
@@ -696,8 +698,9 @@ fn check_grades_how_lip_files_follow_their_sounds() {
         "{info}"
     );
     assert!(info.contains("\n  movement: "), "{info}");
+    assert!(info.contains("\n  hold: one shape held through at most "), "{info}");
     assert!(
-        info.contains("\n  offset: best alignment 150 to 300 ms off is 0."),
+        info.contains("\n  offset: best alignment 60 to 300 ms late or 130 to 300 ms early is 0."),
         "{info}"
     );
     assert!(

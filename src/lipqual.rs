@@ -17,10 +17,12 @@ const LOUD_DB: f32 = 15.0;
 /// A mouth shut through more of the loud frames than this is an error: wav2lip's files are (96% of them), none of
 /// Interplay's (with valid codes) or ours is.
 const SHUT_LIMIT: f64 = 0.5;
-/// Offsets up to this many 10 ms frames go unseen (see [`crate::lip::Fit`]), so alignment is the best within them.
-const UNSEEN_FRAMES: i32 = 5;
-/// From this many frames an offset is seen; offsets are looked for up to [`OFFSET_FRAMES`], and far ones beyond.
-const SEEN_FRAMES: i32 = 15;
+/// Offsets no player sees go unjudged, and alignment is the best within them: a mouth up to this many 10 ms frames
+/// late (sound ahead of the picture shows from about 45 ms, ITU-R BT.1359) ...
+const LATE_UNSEEN_FRAMES: i32 = 5;
+/// ... or this many early (sound behind the picture shows from about 125 ms). The engine's own lead, its mouth
+/// following the mixer at least one 23 ms buffer ahead of the speakers, is not counted: late errs strict.
+const EARLY_UNSEEN_FRAMES: i32 = 12;
 /// The longest offset looked for under the plain limits: 300 ms.
 const OFFSET_FRAMES: i32 = 30;
 /// The longest far offset looked for: 600 ms. Looking to 1 s under the plain limits flagged 11% of Interplay's files,
@@ -37,8 +39,12 @@ const OPEN_QUIET_LIMIT: f64 = 0.5;
 /// Speech shorter than this (frames) has too few shapes for a rate.
 const MOVEMENT_MIN_FRAMES: usize = 100;
 /// Shape changes per second of speech outside these are a warning, a mouth that hardly moves or one that jitters:
-/// Interplay's files range 1.9 to 14.7, wav2lip's 0.5 to 38.
-const MOVEMENT: (f64, f64) = (1.0, 20.0);
+/// Interplay's files range 1.9 (a drawn-out "Riiiight...", the one warned about) to 14.7, wav2lip's 0.5 to 38.
+const MOVEMENT: (f64, f64) = (2.0, 20.0);
+/// One shape held through more than this of unbroken speech (seconds) is a warning, a mouth frozen while the voice
+/// goes on: on 3.7% of Interplay's files (most of them drawn-out words, "Ahhh", "Hmmm"; their median 0.33), 11% of
+/// ours from the text, 26% from the sound alone, and 69% of wav2lip's.
+const HOLD_LIMIT: f64 = 0.65;
 /// Head frames 0 to 8 ranked by the median loudness rank of the speech frames showing them in Interplay's files
 /// (rest 0.14, then frame 4, closed lips 0.43, 2, 5, 3, 8, 1, and 7 at 0.71): how wide each opens, as voiced.
 const OPENNESS: [u8; 9] = [0, 7, 3, 5, 1, 4, 2, 8, 6];
@@ -47,19 +53,22 @@ const OPENNESS: [u8; 9] = [0, 7, 3, 5, 1, 4, 2, 8, 6];
 const OFFSET_MIN_SECONDS: f64 = 2.0;
 /// An offset is reported when the mouth aligns this well there ...
 const OFFSET_ALIGNMENT: f64 = 0.7;
-/// ... and this much better than within the unseen offsets. It flags 3.5% of Interplay's lines (some of them
-/// truly 150 to 300 ms off), 1% of ours from the sound and 8% from the text, and half of the originals moved 200 ms
-/// late.
-const OFFSET_GAIN: f64 = 0.15;
+/// ... and this much better than within the unseen offsets, and better than chance ([`CHANCE_COPIES`]). It flags
+/// 0.4% of Interplay's lines, 0.5% of ours from the text and 0.1% from the sound; 19% of the originals moved 100 ms
+/// late, 53% moved 200 ms late. Interplay's lines 100 ms early get 2.5%.
+const OFFSET_GAIN: f64 = 0.08;
 /// A far offset needs a line this long (seconds) ...
 const FAR_OFFSET_MIN_SECONDS: f64 = 3.0;
-/// ... and this gain, as more offsets are tried there: that adds 1.2% of Interplay's lines, and 37% of the originals
+/// ... and this gain, as more offsets are tried there: it flags none of Interplay's lines, and 52% of the originals
 /// moved 500 ms late.
 const FAR_OFFSET_GAIN: f64 = 0.25;
+/// An offset is reported only when it aligns better than each of this many copies of the line's lip file, its shapes
+/// in speech shuffled, manage at their best offset in the same band: chance under 1 in 20.
+const CHANCE_COPIES: usize = 19;
 /// A directory of at least this many lip files is graded as a set, where chance evens out ...
 const SET_MIN: usize = 15;
-/// ... and warned about below this median alignment: Fallout 2's 11 speech directories have 0.64 to 0.82, speakers'
-/// sets of other lines' lip files 0.53 to 0.59 ...
+/// ... and warned about below this median alignment: Fallout 2's 11 speech directories have 0.67 to 0.96, ours 0.89
+/// to 0.99; speakers' sets of other lines' lip files 0.52 to 0.75, so width catches those alignment misses ...
 const SET_ALIGNMENT: f64 = 0.6;
 /// ... or above this median share of the loud speech shown shut: Fallout 2's directories have 0.06 to 0.25, ours
 /// 0.01 to 0.06 per speaker, wav2lip's 0.78 to 0.90 ...
@@ -67,8 +76,8 @@ const SET_SHUT: f64 = 0.35;
 /// ... or with a median of closures per m, b and p outside these: Fallout 2's directories have 0.75 to 1.50,
 /// wav2lip's 0 (it never closes the lips) ...
 const SET_CLOSURES: (f64, f64) = (0.5, 1.6);
-/// ... or below this median openness: Fallout 2's directories have 0.20 to 0.51, ours 0.39 to 0.68, wav2lip's 0.21
-/// to 0.31, other lines' lip files and the originals moved or shuffled 0.12 at most ...
+/// ... or below this median openness: Fallout 2's directories have 0.23 to 0.51, ours 0.39 to 0.68, wav2lip's 0.21
+/// to 0.31, other lines' lip files and the originals moved 200 ms or more or shuffled 0.13 at most ...
 const SET_OPENNESS: f64 = 0.16;
 /// ... or above this median share of the quiet shown open: Fallout 2's directories have 0 to 0.06, other lines' lip
 /// files and the originals moved 500 ms late or shuffled 0.42 and more ...
@@ -118,28 +127,43 @@ impl fmt::Display for TextFit {
     }
 }
 
+/// The best alignment within a band of offsets a player sees.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Offset {
+    /// The alignment there.
+    pub alignment: f64,
+    /// The offset, in milliseconds (positive: the mouth runs late).
+    pub ms: f64,
+    /// The best that copies of the lip file, its shapes in speech shuffled, reach in the band; `None` unless the
+    /// offset would be reported otherwise, as each copy costs a sweep of the band.
+    pub chance: Option<f64>,
+}
+
 /// How a lip file follows its sound.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Quality {
     /// Share of the loud frames that show a shut mouth (rest, or closed lips); `None` for a sound with no speech.
     pub shut_while_loud: Option<f64>,
-    /// Chance that a frame of speech showing an open mouth is louder than one showing it shut: 0.5 is chance, 1 a
-    /// mouth that opens exactly with the loudness. The best within the offsets no player sees. `None` when the mouth
-    /// is never open, or never shut, in speech.
+    /// The part of [`Quality::shut_while_loud`] showing closed lips, as an m, b or p does.
+    pub closed_while_loud: Option<f64>,
+    /// Chance that a frame of speech showing an open mouth is louder than one showing it at rest: 0.5 is chance, 1 a
+    /// mouth that opens exactly with the loudness. Closed lips count on neither side, as an m is voiced. The best
+    /// within the offsets no player sees. `None` when the mouth is never open, or never at rest, in speech.
     pub alignment: Option<f64>,
     /// Rank correlation of how wide the mouth opens (head frames ranked by the loudness they show in Interplay's
     /// files) with the loudness, over speech: 0 is chance. The best within the offsets no player sees. `None` when the
     /// mouth shows one width all through the speech.
     pub openness: Option<f64>,
-    /// The best alignment 150 to 300 ms off, and that offset in milliseconds (positive: the mouth runs late); `None`
-    /// for a line too short to show one.
-    pub offset: Option<(f64, f64)>,
+    /// The best alignment 60 to 300 ms late or 130 to 300 ms early; `None` for a line too short to show one.
+    pub offset: Option<Offset>,
     /// The same 310 to 600 ms off, where a line must be longer still.
-    pub far_offset: Option<(f64, f64)>,
+    pub far_offset: Option<Offset>,
     /// Share of the quiet frames, away from speech, that show an open mouth; `None` for a sound with little quiet.
     pub open_while_quiet: Option<f64>,
     /// Shape changes per second of speech; `None` for a sound with little speech.
     pub movement: Option<f64>,
+    /// The longest one shape is held through unbroken speech, in seconds; `None` for a sound with no speech.
+    pub longest_hold: Option<f64>,
     /// How the closed lips fit the line's text, when it was given.
     pub text: Option<TextFit>,
 }
@@ -169,6 +193,11 @@ pub enum QualityProblem {
         /// Changes a second.
         rate: f64,
     },
+    /// The mouth holds one shape through this many seconds of unbroken speech.
+    Held {
+        /// Seconds.
+        seconds: f64,
+    },
 }
 
 impl QualityProblem {
@@ -179,7 +208,8 @@ impl QualityProblem {
             QualityProblem::Offset { .. }
             | QualityProblem::Closures(_)
             | QualityProblem::OpenWhileQuiet { .. }
-            | QualityProblem::Movement { .. } => Severity::Warning,
+            | QualityProblem::Movement { .. }
+            | QualityProblem::Held { .. } => Severity::Warning,
         }
     }
 }
@@ -206,8 +236,21 @@ impl fmt::Display for QualityProblem {
                 let how = if *rate < MOVEMENT.0 { "hardly moves" } else { "jitters" };
                 write!(f, "the mouth {how}: {rate:.1} shape changes a second of speech")
             }
+            QualityProblem::Held { seconds } => {
+                write!(
+                    f,
+                    "the mouth holds one shape through {:.0} ms of unbroken speech",
+                    1000.0 * seconds
+                )
+            }
         }
     }
+}
+
+/// Whether an offset aligning `offset` would be reported against `near`, the alignment where no offset shows, before
+/// chance is weighed.
+fn stands_out(near: Option<f64>, offset: f64, gain: f64) -> bool {
+    near.is_some_and(|near| offset >= OFFSET_ALIGNMENT && offset - near >= gain)
 }
 
 impl Quality {
@@ -219,9 +262,10 @@ impl Quality {
         {
             out.push(QualityProblem::Shut { share });
         }
-        let found = |offset, gain| match (self.alignment, offset) {
-            (Some(near), Some((far, ms))) if far >= OFFSET_ALIGNMENT && far - near >= gain => Some(ms),
-            _ => None,
+        let found = |offset: Option<Offset>, gain| {
+            offset
+                .filter(|o| stands_out(self.alignment, o.alignment, gain) && o.chance.is_some_and(|c| o.alignment > c))
+                .map(|o| o.ms)
         };
         if let Some(ms) = found(self.offset, OFFSET_GAIN).or_else(|| found(self.far_offset, FAR_OFFSET_GAIN)) {
             out.push(QualityProblem::Offset { ms });
@@ -243,6 +287,11 @@ impl Quality {
         {
             out.push(QualityProblem::Movement { rate });
         }
+        if let Some(seconds) = self.longest_hold
+            && seconds > HOLD_LIMIT
+        {
+            out.push(QualityProblem::Held { seconds });
+        }
         out
     }
 }
@@ -256,6 +305,8 @@ pub struct SetGrade {
     pub alignment: Option<f64>,
     /// Their median [`Quality::shut_while_loud`].
     pub shut: f64,
+    /// Their median [`Quality::closed_while_loud`].
+    pub closed: f64,
     /// Their median [`TextFit::ratio`], when enough of them have text with m, b or p.
     pub closures: Option<f64>,
     /// Their median [`Quality::openness`], when enough of them have one.
@@ -324,6 +375,7 @@ impl fmt::Display for SetProblem {
 /// Grades a directory's lip files, when there are enough of them for chance to even out.
 pub fn grade(files: &[Quality]) -> Option<SetGrade> {
     let shut: Vec<f64> = files.iter().filter_map(|q| q.shut_while_loud).collect();
+    let closed: Vec<f64> = files.iter().filter_map(|q| q.closed_while_loud).collect();
     // The median of a figure, when enough of the files have it.
     let of = |figure: &dyn Fn(&Quality) -> Option<f64>| {
         let v: Vec<f64> = files.iter().filter_map(figure).collect();
@@ -333,6 +385,7 @@ pub fn grade(files: &[Quality]) -> Option<SetGrade> {
         files: shut.len(),
         alignment: of(&|q| q.alignment),
         shut: median(&shut),
+        closed: median(&closed),
         closures: of(&|q| q.text?.ratio()),
         openness: of(&|q| q.openness),
         open_while_quiet: of(&|q| q.open_while_quiet),
@@ -421,12 +474,14 @@ pub fn quality(l: &Lip, audio: &Audio, text: Option<&[Token]>) -> Quality {
     if analysis.segments.is_empty() || l.phonemes.iter().any(|&c| c >= PHONEME_COUNT) {
         return Quality {
             shut_while_loud: None,
+            closed_while_loud: None,
             alignment: None,
             openness: None,
             offset: None,
             far_offset: None,
             open_while_quiet: None,
             movement: None,
+            longest_hold: None,
             text: None,
         };
     }
@@ -440,29 +495,40 @@ pub fn quality(l: &Lip, audio: &Audio, text: Option<&[Token]>) -> Quality {
     let p95 = sorted[((n - 1) as f64 * 0.95).round() as usize];
     let loud: Vec<usize> = (0..n).filter(|&i| db[i] >= p95 - LOUD_DB).collect();
     let shut = loud.iter().filter(|&&i| !open(shown[i])).count();
-    let (mut near, mut openness) = (None::<f64>, None::<f64>);
-    let (mut offset, mut far_offset) = (None::<(f64, f64)>, None::<(f64, f64)>);
-    for lag in -MAX_FRAMES..=MAX_FRAMES {
-        if lag.abs() <= UNSEEN_FRAMES
-            && let Some(r) = width_correlation(&shown, &db, &speaking, lag)
-        {
-            openness = Some(openness.map_or(r, |b| b.max(r)));
-        }
-        let Some(a) = alignment(&shown, &db, &speaking, lag) else {
-            continue;
+    let closed = loud.iter().filter(|&&i| shown[i] == CLOSED).count();
+    let openness = (-EARLY_UNSEEN_FRAMES..=LATE_UNSEEN_FRAMES)
+        .filter_map(|lag| width_correlation(&shown, &db, &speaking, lag))
+        .reduce(f64::max);
+    // The best alignment of `shown` over the offsets of a band, and that offset.
+    let best = |shown: &[u8], band: Band| {
+        (-MAX_FRAMES..=MAX_FRAMES)
+            .filter(|&lag| band_of(lag) == band)
+            .filter_map(|lag| Some((alignment(shown, &db, &speaking, lag)?, lag)))
+            .reduce(|b, x| if x.0 > b.0 { x } else { b })
+    };
+    let near = best(&shown, Band::Unseen).map(|b| b.0);
+    let offset = |band: Band, gain: f64, min_seconds: f64| {
+        let (a, lag) = best(&shown, band).filter(|_| seconds >= min_seconds)?;
+        let chance = stands_out(near, a, gain).then(|| {
+            let mut seed = SEED;
+            (0..CHANCE_COPIES)
+                .filter_map(|_| best(&shuffled(&shown, &speaking, &mut seed), band).map(|b| b.0))
+                .fold(f64::NEG_INFINITY, f64::max)
+        });
+        Some(Offset {
+            alignment: a,
+            ms: f64::from(lag * 10),
+            chance,
+        })
+    };
+    let (mut hold, mut longest) = (0usize, 0usize);
+    for i in 0..n {
+        hold = match speaking[i] {
+            false => 0,
+            true if i > 0 && speaking[i - 1] && shown[i] == shown[i - 1] => hold + 1,
+            true => 1,
         };
-        let best = match lag.abs() {
-            l if l <= UNSEEN_FRAMES => {
-                near = Some(near.map_or(a, |b| b.max(a)));
-                continue;
-            }
-            l if l < SEEN_FRAMES => continue,
-            l if l <= OFFSET_FRAMES => &mut offset,
-            _ => &mut far_offset,
-        };
-        if best.is_none_or(|(b, _)| a > b) {
-            *best = Some((a, f64::from(lag * 10)));
-        }
+        longest = longest.max(hold);
     }
     let span = (
         analysis.segments.first().map_or(0, |s| s.start),
@@ -474,15 +540,75 @@ pub fn quality(l: &Lip, audio: &Audio, text: Option<&[Token]>) -> Quality {
     let changes = (1..n).filter(|&i| speaking[i] && shown[i] != shown[i - 1]).count();
     Quality {
         shut_while_loud: (!loud.is_empty()).then(|| shut as f64 / loud.len() as f64),
+        closed_while_loud: (!loud.is_empty()).then(|| closed as f64 / loud.len() as f64),
         alignment: near,
         openness,
-        offset: offset.filter(|_| seconds >= OFFSET_MIN_SECONDS),
-        far_offset: far_offset.filter(|_| seconds >= FAR_OFFSET_MIN_SECONDS),
+        offset: offset(Band::Near, OFFSET_GAIN, OFFSET_MIN_SECONDS),
+        far_offset: offset(Band::Far, FAR_OFFSET_GAIN, FAR_OFFSET_MIN_SECONDS),
         open_while_quiet: (quiet.len() >= QUIET_MIN).then(|| open_quiet as f64 / quiet.len() as f64),
         movement: (speech_frames >= MOVEMENT_MIN_FRAMES)
             .then(|| changes as f64 * f64::from(speech::FRAMES_PER_SECOND) / speech_frames as f64),
+        longest_hold: Some(longest as f64 / f64::from(speech::FRAMES_PER_SECOND)),
         text: text.map(|t| text_fit(&shown, &speaking, span, t)),
     }
+}
+
+/// Where an offset falls.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Band {
+    /// No player sees it.
+    Unseen,
+    /// Seen, up to [`OFFSET_FRAMES`].
+    Near,
+    /// Beyond, up to [`MAX_FRAMES`].
+    Far,
+}
+
+/// The band of an offset of `lag` frames (positive: the mouth runs late).
+fn band_of(lag: i32) -> Band {
+    if (-EARLY_UNSEEN_FRAMES..=LATE_UNSEEN_FRAMES).contains(&lag) {
+        Band::Unseen
+    } else if lag.abs() <= OFFSET_FRAMES {
+        Band::Near
+    } else {
+        Band::Far
+    }
+}
+
+/// The seed of the shuffled copies, fixed so a file is judged the same each time.
+const SEED: u64 = 0x2545_F491_4F6C_DD1D;
+
+/// `shown` with its runs of one head frame inside speech in a seeded random order, each keeping its length; the
+/// frames outside speech stay where they are.
+fn shuffled(shown: &[u8], speaking: &[bool], seed: &mut u64) -> Vec<u8> {
+    let mut runs: Vec<(u8, usize)> = Vec::new();
+    for (i, &frame) in shown.iter().enumerate() {
+        if !speaking[i] {
+            continue;
+        }
+        match runs.last_mut() {
+            Some((f, len)) if *f == frame && i > 0 && speaking[i - 1] => *len += 1,
+            _ => runs.push((frame, 1)),
+        }
+    }
+    for i in (1..runs.len()).rev() {
+        *seed ^= *seed << 13;
+        *seed ^= *seed >> 7;
+        *seed ^= *seed << 17;
+        runs.swap(i, (*seed % (i as u64 + 1)) as usize);
+    }
+    let mut out = shown.to_vec();
+    let frames = runs.iter().flat_map(|&(f, len)| std::iter::repeat_n(f, len));
+    for (o, f) in out
+        .iter_mut()
+        .zip(speaking)
+        .filter(|(_, s)| **s)
+        .map(|(o, _)| o)
+        .zip(frames)
+    {
+        *o = f;
+    }
+    out
 }
 
 /// The frames more than [`QUIET_MARGIN`] frames from any speech.
@@ -599,7 +725,7 @@ fn text_fit(shown: &[u8], speaking: &[bool], span: (usize, usize), text: &[Token
     }
 }
 
-/// The chance that a speech frame showing an open mouth `lag` frames later is louder than one showing it shut
+/// The chance that a speech frame showing an open mouth `lag` frames later is louder than one showing it at rest
 /// (Mann-Whitney, ties counted half); `None` without both.
 fn alignment(shown: &[u8], db: &[f32], speaking: &[bool], lag: i32) -> Option<f64> {
     let (mut opened, mut shut) = (Vec::new(), Vec::new());
@@ -608,7 +734,11 @@ fn alignment(shown: &[u8], db: &[f32], speaking: &[bool], lag: i32) -> Option<f6
             continue;
         };
         if speaking[i] {
-            if open(shown[j]) { opened.push(d) } else { shut.push(d) }
+            match shown[j] {
+                CLOSED => {}
+                0 => shut.push(d),
+                _ => opened.push(d),
+            }
         }
     }
     if opened.is_empty() || shut.is_empty() {
@@ -660,23 +790,30 @@ mod tests {
         (Audio::from_i16(22050, 1, samples), bursts)
     }
 
-    /// A lip file opening the mouth (head frame 3) over each burst, `late` samples after it, and shut between.
-    fn following(audio: &Audio, bursts: &[(usize, usize)], late: usize) -> Lip {
+    /// A lip file opening the mouth (head frame 3) over each burst, `late` samples after it (before it when
+    /// negative), and at rest between.
+    fn following(audio: &Audio, bursts: &[(usize, usize)], late: isize) -> Lip {
+        following_with(audio, bursts, late, &[1])
+    }
+
+    /// [`following`], each burst showing `codes` in turn, evenly.
+    fn following_with(audio: &Audio, bursts: &[(usize, usize)], late: isize, shapes: &[u8]) -> Lip {
         let last = 2 * audio.len() as i32;
-        let at = |s: usize| (2 * (s + late)).min(audio.len() * 2) as i32;
+        let at = |s: usize| (2 * s.saturating_add_signed(late)).min(audio.len() * 2) as i32;
         let (mut codes, mut markers) = (vec![0], vec![Marker { kind: 1, position: 0 }]);
         for &(a, b) in bursts {
-            codes.extend([1, 0]);
-            markers.extend([
-                Marker {
+            for (k, &code) in shapes.iter().enumerate() {
+                codes.push(code);
+                markers.push(Marker {
                     kind: 1,
-                    position: at(a),
-                },
-                Marker {
-                    kind: 1,
-                    position: at(b),
-                },
-            ]);
+                    position: at(a + (b - a) * k / shapes.len()),
+                });
+            }
+            codes.push(0);
+            markers.push(Marker {
+                kind: 1,
+                position: at(b),
+            });
         }
         markers.push(Marker {
             kind: 1,
@@ -714,12 +851,13 @@ mod tests {
     fn a_mouth_shut_through_the_speech_is_an_error() {
         let audio = speech();
         let q = quality(&whole(0, &audio), &audio, None);
-        // A mouth that never opens does not move either.
+        // A mouth that never opens does not move either, and holds its shape through the longest stretch of speech.
         assert_eq!(
             q.problems(),
             [
                 QualityProblem::Shut { share: 1.0 },
-                QualityProblem::Movement { rate: 0.0 }
+                QualityProblem::Movement { rate: 0.0 },
+                QualityProblem::Held { seconds: 1.23 }
             ]
         );
         assert_eq!(q.problems()[0].severity(), Severity::Error);
@@ -749,6 +887,81 @@ mod tests {
     }
 
     #[test]
+    fn a_mouth_100_ms_late_is_seen_and_100_ms_early_is_not() {
+        let (audio, bursts) = talking();
+        let q = quality(&following(&audio, &bursts, 22050 / 10), &audio, None);
+        assert_eq!(q.problems(), [QualityProblem::Offset { ms: 100.0 }], "{q:?}");
+        let q = quality(&following(&audio, &bursts, -22050 / 10), &audio, None);
+        assert_eq!(q.problems(), [], "{q:?}");
+    }
+
+    #[test]
+    fn an_offset_no_better_than_shuffled_copies_is_not_reported() {
+        let q = |chance| Quality {
+            shut_while_loud: Some(0.0),
+            closed_while_loud: Some(0.0),
+            alignment: Some(0.6),
+            openness: None,
+            offset: Some(Offset {
+                alignment: 0.9,
+                ms: 200.0,
+                chance,
+            }),
+            far_offset: None,
+            open_while_quiet: None,
+            movement: None,
+            longest_hold: None,
+            text: None,
+        };
+        assert_eq!(q(Some(0.8)).problems(), [QualityProblem::Offset { ms: 200.0 }]);
+        assert_eq!(q(Some(0.9)).problems(), []);
+        // Not weighed against chance: not standing out in the first place.
+        assert_eq!(q(None).problems(), []);
+    }
+
+    #[test]
+    fn closed_lips_count_neither_as_open_nor_as_rest() {
+        let (audio, bursts) = talking();
+        // The lips close for the first half of each burst: loud and shut, yet aligned as well as a mouth open all
+        // through (better, as the onsets' quieter frames drop out); counted as rest, they would be most of the shut.
+        let q = quality(&following_with(&audio, &bursts, 0, &[17, 1]), &audio, None);
+        let all = quality(&following(&audio, &bursts, 0), &audio, None);
+        assert!(q.alignment.unwrap() >= all.alignment.unwrap(), "{q:?} {all:?}");
+        // The shut frames at rest are the same in both; the closed lips come on top.
+        let at_rest = |q: &Quality| q.shut_while_loud.unwrap() - q.closed_while_loud.unwrap();
+        assert!((at_rest(&q) - at_rest(&all)).abs() < 1e-9, "{q:?} {all:?}");
+        assert!(q.closed_while_loud.unwrap() > 0.3, "{q:?}");
+        assert_eq!(all.closed_while_loud, Some(0.0));
+    }
+
+    #[test]
+    fn movement_and_holds_are_judged_at_their_limits() {
+        let q = |movement, longest_hold| {
+            Quality {
+                shut_while_loud: Some(0.0),
+                closed_while_loud: Some(0.0),
+                alignment: None,
+                openness: None,
+                offset: None,
+                far_offset: None,
+                open_while_quiet: None,
+                movement: Some(movement),
+                longest_hold: Some(longest_hold),
+                text: None,
+            }
+            .problems()
+        };
+        assert_eq!(q(MOVEMENT.0, HOLD_LIMIT), []);
+        assert_eq!(
+            q(1.9, 0.66),
+            [
+                QualityProblem::Movement { rate: 1.9 },
+                QualityProblem::Held { seconds: 0.66 }
+            ]
+        );
+    }
+
+    #[test]
     fn a_mouth_held_open_from_start_to_end_is_warned_about() {
         let audio = speech();
         let q = quality(&whole(1, &audio), &audio, None);
@@ -758,7 +971,8 @@ mod tests {
             q.problems(),
             [
                 QualityProblem::OpenWhileQuiet { share: 1.0 },
-                QualityProblem::Movement { rate: 0.0 }
+                QualityProblem::Movement { rate: 0.0 },
+                QualityProblem::Held { seconds: 1.23 }
             ]
         );
     }
@@ -869,12 +1083,14 @@ mod tests {
     fn a_set_is_graded_by_its_medians_once_it_is_large_enough() {
         let file = |alignment, shut| Quality {
             shut_while_loud: Some(shut),
+            closed_while_loud: Some(0.0),
             alignment: Some(alignment),
             openness: None,
             offset: None,
             far_offset: None,
             open_while_quiet: None,
             movement: None,
+            longest_hold: None,
             text: None,
         };
         assert_eq!(grade(&vec![file(0.5, 0.9); SET_MIN - 1]), None);
