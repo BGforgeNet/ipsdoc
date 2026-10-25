@@ -204,9 +204,9 @@ pub fn align(tokens: &[Token], a: &Analysis, weight: f64) -> Vec<Placed> {
             Unit::Unscripted => (1, n, UNSCRIPTED_COST, true),
             Unit::Sound { class, .. } => (MIN_SOUND, longest(class), 0.0, false),
         };
-        let length = |d: usize| match u {
-            Unit::Pause { .. } | Unit::Unscripted => 0.0,
-            Unit::Sound { class, .. } => length_cost(*class, d, weight),
+        let length = match *u {
+            Unit::Pause { .. } | Unit::Unscripted => vec![0.0; longest + 1],
+            Unit::Sound { class, .. } => length_costs(class, weight),
         };
         for j in 0..=n {
             let (mut best, mut arg) = (f64::INFINITY, usize::MAX);
@@ -215,7 +215,7 @@ pub fn align(tokens: &[Token], a: &Analysis, weight: f64) -> Vec<Placed> {
             }
             if j >= shortest {
                 for i in j.saturating_sub(longest)..=j - shortest {
-                    let c = cost[ui][i] + (sums[j] - sums[i]) + length(j - i) + extra;
+                    let c = cost[ui][i] + (sums[j] - sums[i]) + length[j - i] + extra;
                     if c < best {
                         (best, arg) = (c, i);
                     }
@@ -260,6 +260,13 @@ pub fn recognise(a: &Analysis, span: std::ops::Range<usize>) -> Vec<Placed> {
     let fit: Vec<Vec<f64>> = (0..CLASSES)
         .map(|c| if c == NOISE { Vec::new() } else { misfit(x, c) })
         .collect();
+    let lengths: Vec<Vec<f64>> = (0..CLASSES)
+        .map(|c| match c {
+            NOISE => Vec::new(),
+            SILENCE => vec![0.0; MAX_PAUSE + 1],
+            _ => length_costs(c, RECOGNISE_DURATION_WEIGHT),
+        })
+        .collect();
     let closed = [g2p::Arpabet::B, g2p::Arpabet::M, g2p::Arpabet::P].map(|s| s as usize);
     // best[j][c]: the cheapest run over frames 0..j whose last stretch, of class c, ends at j; back[j][c]: where that
     // stretch starts and the class before it. enter[i][c]: the cheapest run that a stretch of class c can start at i.
@@ -279,12 +286,7 @@ pub fn recognise(a: &Analysis, span: std::ops::Range<usize>) -> Vec<Placed> {
             };
             for i in j.saturating_sub(longest)..=j.saturating_sub(shortest) {
                 let (from, _) = enter[i][c];
-                let length = if c == SILENCE {
-                    0.0
-                } else {
-                    length_cost(c, j - i, RECOGNISE_DURATION_WEIGHT)
-                };
-                let v = from + (fit[c][j] - fit[c][i]) + length + extra;
+                let v = from + (fit[c][j] - fit[c][i]) + lengths[c][j - i] + extra;
                 if v < best[j][c] {
                     best[j][c] = v;
                     back[j][c] = (i, enter[i][c].1);
@@ -362,11 +364,16 @@ fn longest(c: usize) -> usize {
     (f64::from(mu + 3.0 * sd).exp().ceil() as usize).clamp(4, 80)
 }
 
-/// The cost of a sound of class `c` lasting `d` frames, against its typical length.
-fn length_cost(c: usize, d: usize, weight: f64) -> f64 {
+/// The cost of a sound of class `c` lasting `d` frames, against its typical length, for each `d` up to [`longest`], so
+/// the decoders look it up rather than take a logarithm per frame and length.
+fn length_costs(c: usize, weight: f64) -> Vec<f64> {
     let (mu, sd) = DUR[c];
-    let z = ((d as f64).ln() - f64::from(mu)) / f64::from(sd);
-    weight * 0.5 * z * z
+    (0..=longest(c))
+        .map(|d| {
+            let z = ((d as f64).ln() - f64::from(mu)) / f64::from(sd);
+            weight * 0.5 * z * z
+        })
+        .collect()
 }
 
 fn class(u: &Unit) -> usize {
