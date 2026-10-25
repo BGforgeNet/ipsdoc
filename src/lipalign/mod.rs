@@ -4,9 +4,11 @@
 //! lacks before and after it. Without text, [`recognise`] picks the likeliest run of any sounds the same way, each
 //! sound following the one before as often as speech has it.
 
+mod model;
+
 use crate::g2p::{self, Token};
-use crate::lipmodel::{DUR, MEAN, NEXT, VAR};
 use crate::speech::{Analysis, CEPSTRA};
+use model::{DUR, MEAN, NEXT, VAR};
 
 /// Features per frame: [`LOUDNESS`] of them from the loudness, then the cepstrum and its slope.
 pub const FEATURES: usize = LOUDNESS + 2 * CEPSTRA;

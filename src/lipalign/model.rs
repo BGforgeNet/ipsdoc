@@ -2,7 +2,7 @@
 //! it was fitted); do not edit by hand. Rows follow `lipalign`'s classes: the ARPAbet sounds, a vocal noise,
 //! silence. Features follow `lipalign::features`.
 
-use crate::lipalign::{CLASSES, FEATURES};
+use super::{CLASSES, FEATURES};
 
 /// Per class, each feature's mean.
 #[rustfmt::skip]

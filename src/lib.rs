@@ -25,7 +25,6 @@ pub mod input;
 pub mod lip;
 pub mod lipalign;
 pub mod lipgen;
-mod lipmodel;
 pub mod lipqual;
 pub mod msg;
 pub mod output;

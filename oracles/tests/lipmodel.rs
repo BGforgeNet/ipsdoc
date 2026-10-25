@@ -1,4 +1,4 @@
-//! Fits `src/lipmodel.rs`, the per-sound model `lipalign` places a line's sounds with, and fails when the committed
+//! Fits `src/lipalign/model.rs`, the per-sound model `lipalign` places a line's sounds with, and fails when the committed
 //! table differs, printing the fitted one to put in its place.
 //!
 //! The model comes from forced alignments of Fallout 2's voiced lines by the Montreal Forced Aligner (its English
@@ -162,7 +162,7 @@ fn lipmodel_is_fitted_to_the_alignments() {
         "//! The per-sound model `lipalign` places sounds with, written by `oracles/tests/lipmodel.rs` (which says how\n\
          //! it was fitted); do not edit by hand. Rows follow `lipalign`'s classes: the ARPAbet sounds, a vocal noise,\n\
          //! silence. Features follow `lipalign::features`.\n\n\
-         use crate::lipalign::{CLASSES, FEATURES};\n\n",
+         use super::{CLASSES, FEATURES};\n\n",
     );
     let (mut mean, mut var) = (String::new(), String::new());
     for c in 0..CLASSES {
@@ -207,11 +207,13 @@ fn lipmodel_is_fitted_to_the_alignments() {
          /// Per class, the cost (-ln of the chance) of each class following it.\n#[rustfmt::skip]\n\
          pub(crate) const NEXT: [[f32; CLASSES]; CLASSES] = [\n{next}];\n"
     );
-    let committed = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/lipmodel.rs")).unwrap();
+    let committed =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/lipalign/model.rs")).unwrap();
     if committed != table {
         println!("{table}");
         panic!(
-            "src/lipmodel.rs differs from the model fitted to {lines} lines: put the table printed above in its place"
+            "src/lipalign/model.rs differs from the model fitted to {lines} lines: put the table printed above in its \
+             place"
         );
     }
 }
