@@ -1,7 +1,7 @@
 //! `ipsdoc`: converts, inspects, checks and repairs Interplay ACM, WAVC and other game sound files.
 
 use std::collections::{BTreeMap, HashSet};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::num::{NonZeroU16, NonZeroU32};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -188,12 +188,15 @@ fn read_file(path: &Path) -> Result<Vec<u8>, Failure> {
     std::fs::read(path).map_err(|e| fail(1, format!("{}: {e}", path.display())))
 }
 
-/// Replaces the file at `path` with `bytes` through a sibling file renamed over it, so a failure leaves the original.
+/// Replaces the file at `path` with `bytes` through a sibling file, on disk before it is renamed over the original, so
+/// a failure or a power loss leaves either the original or the new file whole.
 fn replace_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".ipsdoc-tmp");
     let tmp = PathBuf::from(tmp);
-    let written = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path));
+    let written = std::fs::File::create(&tmp)
+        .and_then(|mut f| f.write_all(bytes).and_then(|()| f.sync_all()))
+        .and_then(|()| std::fs::rename(&tmp, path));
     if written.is_err() {
         // Best effort: the original is intact either way, and the write error is what the caller reports.
         let _ = std::fs::remove_file(&tmp);
