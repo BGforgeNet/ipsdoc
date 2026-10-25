@@ -30,7 +30,7 @@ jobs:
           workspaces: |
             .
             fuzz
-      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-deny@0.20.2,cargo-shear@1.14.0,zizmor@1.31.1
       - run: .github/scripts/build-lint.sh
@@ -166,12 +166,8 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-${{ matrix.target }}
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: 0.16.0
-          use-cache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-          cache-key: ${{ matrix.target }}
-      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+      - run: .github/scripts/install-zig.sh
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-about@0.9.2,cargo-zigbuild@0.23.4
       - run: rustup target add ${{ matrix.rust-targets }}
