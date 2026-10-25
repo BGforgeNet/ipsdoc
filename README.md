@@ -28,6 +28,7 @@ that cannot be carried out (bad options, an output that would overwrite the inpu
 ### Examples
 
 - [Convert](#convert)
+- [Infinity Engine mods](#infinity-engine-mods)
 - [Inspect and repair](#inspect-and-repair)
 - [Check a directory](#check-a-directory)
 - [Lip sync](#lip-sync)
@@ -44,11 +45,49 @@ ipsdoc myn1003a.wav myn1003a.acm
 # To Ogg Vorbis, at a higher quality than the default 5
 ipsdoc --quality 8 myn1003a.acm myn1003a.ogg
 
-# For an Infinity Engine game: WAVC, under the .wav name the game loads
-ipsdoc myn1003a.ogg --to wavc override/MYN1003A.wav
-
 # Resample to 44100 Hz
 ipsdoc --rate 44100 myn1003a.acm myn1003a-44k.acm
+```
+
+#### Infinity Engine mods
+
+The classic games read WAV and WAVC; the Enhanced Editions also read Ogg Vorbis under a `.wav` name. A mod that ships
+Ogg Vorbis decodes it for a classic game when it installs:
+
+```console
+$ ipsdoc audio/imppp04.ogg override/IMPPP04.wav
+override/IMPPP04.wav: 16-bit, from float input: Infinity Engine games read WAV up to 16-bit; add --full-depth to get lossless output
+```
+
+```sh
+# Or to WAVC, the classic games' compressed .wav
+ipsdoc audio/imppp04.ogg --to wavc override/IMPPP04.wav
+
+# A classic game's WAVC to a WAV to edit, and back
+ipsdoc shael_07.wav shael_07-pcm.wav
+ipsdoc shael_07-pcm.wav --to wavc override/SHAEL_07.wav
+```
+
+What a `.wav` holds: WAVC in a mod, Ogg Vorbis in an Enhanced Edition's own voice files:
+
+```console
+$ ipsdoc info shael_07.wav lang/en_US/sounds/bdtpag0.wav
+shael_07.wav: wavc
+  WAVC: 1 channels, 22050 Hz, 16 bits, sizes 94318 / 23002, ACM at 28, field 0x1A = 0x7ffd
+  ACM: 47159 samples, 1 channels, 22050 Hz, levels 6, rows 8
+  reads as: 1 channels, 22050 Hz, 16-bit, 47159 frames, 2.139 s
+lang/en_US/sounds/bdtpag0.wav: ogg
+  reads as: 1 channels, 48000 Hz, float, 32152 frames, 0.670 s
+```
+
+Every sound in a mod, or in a game's music:
+
+```console
+$ ipsdoc check bg1npc
+45 sounds checked, 0 lip files checked, 0 failed
+
+$ ipsdoc check music
+375 sounds checked, 0 lip files checked, 0 failed
 ```
 
 #### Inspect and repair
