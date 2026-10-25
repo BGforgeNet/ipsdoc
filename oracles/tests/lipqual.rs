@@ -252,8 +252,8 @@ fn score(dirs: &[PathBuf], text: &HashMap<String, String>, wav2lip: &Path) -> Ru
             let judge = |l: &Lip| quality(l, audio, words);
             add_loudness(&mut run, original, audio);
             run.add("interplay", &speaker, judge(original));
-            run.add("ours, text", &speaker, judge(&generate(name, audio, words, &p)));
-            run.add("ours, audio", &speaker, judge(&generate(name, audio, None, &p)));
+            run.add("ours, text", &speaker, judge(&generate(name, audio, words, &p).0));
+            run.add("ours, audio", &speaker, judge(&generate(name, audio, None, &p).0));
             match std::fs::read(wav2lip.join(format!("{name}.lip"))) {
                 Ok(b) => {
                     let w = Lip::parse(&b).unwrap_or_else(|e| panic!("wav2lip {name}: {e}"));

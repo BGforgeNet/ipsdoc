@@ -852,7 +852,7 @@ mod tests {
     #[test]
     fn a_lip_file_made_from_its_sound_passes() {
         let audio = speech();
-        let q = quality(&generate("x", &audio, None, &Params::default()), &audio, None);
+        let q = quality(&generate("x", &audio, None, &Params::default()).0, &audio, None);
         assert!(q.shut_while_loud.unwrap() < 0.2, "{q:?}");
         assert!(q.alignment.unwrap() > SET_ALIGNMENT, "{q:?}");
         assert!(q.openness.unwrap() > SET_OPENNESS, "{q:?}");

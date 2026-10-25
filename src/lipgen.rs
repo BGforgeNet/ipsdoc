@@ -50,15 +50,25 @@ impl Default for Params {
     }
 }
 
-/// The lip file for `audio`, a sound named `name`, from its line's `tokens` when there are any.
-pub fn generate(name: &str, audio: &Audio, tokens: Option<&[Token]>, p: &Params) -> Lip {
+/// What a lip file's shapes come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    /// The line's sounds, placed in its speech.
+    Text,
+    /// The sounds heard: there was no text, or it has more sounds than its speech has frames for.
+    Sound,
+}
+
+/// The lip file for `audio`, a sound named `name`, from its line's `tokens` when there are any, and what it was made
+/// from.
+pub fn generate(name: &str, audio: &Audio, tokens: Option<&[Token]>, p: &Params) -> (Lip, Source) {
     let a = speech::analyse(audio, &p.speech);
     let total = audio.frames() as f64 * f64::from(speech::FRAMES_PER_SECOND) / f64::from(audio.rate);
     let placed = tokens
         .filter(|t| t.iter().any(|x| !matches!(x, Token::Break)))
         .map(|t| lipalign::align(t, &a, f64::from(p.duration_weight)))
         .filter(|v| !v.is_empty());
-    // No text, or more sounds than the speech has frames for: the sounds heard.
+    let source = if placed.is_some() { Source::Text } else { Source::Sound };
     let placed = placed.unwrap_or_else(|| lipalign::recognise(&a, 0..a.frames.len()));
     let mut shapes = vec![Shape { start: 0.0, code: 0 }];
     placed_shapes(&placed, &a, p, &mut shapes);
@@ -71,7 +81,7 @@ pub fn generate(name: &str, audio: &Audio, tokens: Option<&[Token]>, p: &Params)
     while shapes.len() > 1 && shapes[1].start <= 0.0 {
         shapes.remove(0);
     }
-    to_lip(name, audio, &shapes)
+    (to_lip(name, audio, &shapes), source)
 }
 
 /// A shape from `start` (in 10 ms frames) to the next shape's start.
@@ -271,7 +281,7 @@ mod tests {
     fn text_shows_closed_lips_and_holds_shapes() {
         let audio = sound(&LINE);
         let t = tokens("map be");
-        let lip = generate("test", &audio, Some(&t), &Params::default());
+        let (lip, _) = generate("test", &audio, Some(&t), &Params::default());
         check_valid(&lip, &audio);
         let s = shapes(&lip);
         let inner = &s[1..s.len() - 1];
@@ -288,7 +298,7 @@ mod tests {
     fn consonants_follow_the_loudness_dips() {
         // "pa pa" over loud-quiet-loud with the quiet part early: the second P belongs in the dip, not halfway.
         let audio = sound(&[(0.2, 0.0), (0.25, 9000.0), (0.08, 700.0), (0.6, 9000.0), (0.2, 0.0)]);
-        let lip = generate("test", &audio, Some(&tokens("pa pa")), &Params::default());
+        let (lip, _) = generate("test", &audio, Some(&tokens("pa pa")), &Params::default());
         check_valid(&lip, &audio);
         let lead = f64::from(Params::default().lead);
         let closed: Vec<f64> = lip
@@ -323,7 +333,7 @@ mod tests {
             ..Params::default()
         };
         let t = tokens("fee foo thaw mama lily oak");
-        let lip = generate("test", &audio, Some(&t), &p);
+        let (lip, _) = generate("test", &audio, Some(&t), &p);
         check_valid(&lip, &audio);
         // The third burst (from 1.8 s) starts with a phoneme placed there, never the AW of "thaw" (code 7), which
         // belongs before the second pause.
@@ -340,7 +350,7 @@ mod tests {
     fn caps_the_change_rate() {
         let audio = sound(&LINE);
         let t = tokens("a b c d e f g h i j k l m n o p");
-        let lip = generate("test", &audio, Some(&t), &Params::default());
+        let (lip, _) = generate("test", &audio, Some(&t), &Params::default());
         check_valid(&lip, &audio);
         let changes = shapes(&lip).windows(2).filter(|w| w[0].0 != w[1].0).count();
         assert!(changes as f32 <= 8.0 * 1.2 + 2.0, "{changes} changes over 1.2 s");
@@ -386,7 +396,7 @@ mod tests {
     #[test]
     fn audio_only_opens_on_speech_and_closes_in_silence() {
         let audio = sound(&LINE);
-        let lip = generate("test", &audio, None, &Params::default());
+        let (lip, _) = generate("test", &audio, None, &Params::default());
         check_valid(&lip, &audio);
         assert_eq!(frame_at(&lip, 0.1), 0);
         assert_ne!(frame_at(&lip, 0.6), 0);
@@ -397,7 +407,7 @@ mod tests {
     fn a_short_line_is_padded_to_six_markers() {
         let audio = sound(&[(0.05, 0.0), (0.1, 9000.0), (0.05, 0.0)]);
         let t = tokens("oh");
-        let lip = generate("test", &audio, Some(&t), &Params::default());
+        let (lip, _) = generate("test", &audio, Some(&t), &Params::default());
         check_valid(&lip, &audio);
         assert!(lip.markers.len() >= 6);
     }
@@ -420,11 +430,11 @@ mod tests {
             ]
             .concat(),
         );
-        let lip = generate("test", &audio, Some(&tokens("one two, three four")), &Params::default());
+        let (lip, _) = generate("test", &audio, Some(&tokens("one two, three four")), &Params::default());
         check_valid(&lip, &audio);
         assert_eq!(frame_at(&lip, 0.68), 0, "the pause holds the comma");
         let joined = sound(&[&silent[..], &syllable.repeat(4), &silent].concat());
-        let lip = generate(
+        let (lip, _) = generate(
             "test",
             &joined,
             Some(&tokens("one two, three four")),
@@ -441,15 +451,27 @@ mod tests {
     fn stereo_positions_count_both_channels() {
         let m = sound(&LINE);
         let st = Audio::from_i16(RATE, 2, m.to_i16().iter().flat_map(|&s| [s, s]).collect());
-        let lip = generate("test", &st, Some(&tokens("map be")), &Params::default());
+        let (lip, _) = generate("test", &st, Some(&tokens("map be")), &Params::default());
         assert_eq!(lip.last(), 2 * st.len() as i32);
         assert_eq!(lip.validate(None), vec![]);
     }
 
     #[test]
+    fn a_text_too_long_for_its_speech_is_set_aside_and_says_so() {
+        // 0.1 s of speech has no room for the twenty-odd sounds of this text.
+        let audio = sound(&[(0.05, 0.0), (0.1, 9000.0), (0.05, 0.0)]);
+        let t = tokens("the quick brown fox jumps over the lazy dog");
+        let (lip, source) = generate("test", &audio, Some(&t), &Params::default());
+        check_valid(&lip, &audio);
+        assert_eq!(source, Source::Sound);
+        let (_, source) = generate("test", &sound(&LINE), Some(&tokens("map be")), &Params::default());
+        assert_eq!(source, Source::Text);
+    }
+
+    #[test]
     fn names_the_sound() {
         let audio = sound(&LINE);
-        let lip = generate("cas0103", &audio, None, &Params::default());
+        let (lip, _) = generate("cas0103", &audio, None, &Params::default());
         assert_eq!(lip.name(), "CAS0103");
     }
 }

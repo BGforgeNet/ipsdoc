@@ -431,10 +431,9 @@ fn load_msgs(paths: &[PathBuf]) -> Result<Vec<msg::Entry>, Failure> {
     for p in paths {
         let files = if p.is_dir() {
             let mut f: Vec<PathBuf> = std::fs::read_dir(p)
-                .map_err(|e| fail(1, format!("{}: {e}", p.display())))?
-                .filter_map(|e| e.ok().map(|e| e.path()))
-                .filter(|f| f.extension().is_some_and(|x| x.eq_ignore_ascii_case("msg")))
-                .collect();
+                .and_then(|d| d.map(|e| e.map(|e| e.path())).collect())
+                .map_err(|e| fail(1, format!("{}: {e}", p.display())))?;
+            f.retain(|f| f.extension().is_some_and(|x| x.eq_ignore_ascii_case("msg")));
             f.sort();
             f
         } else {
@@ -914,7 +913,13 @@ fn lip_one(sound: &Path, a: &LipArgs, entries: Option<&[msg::Entry]>) -> Result<
     // Positions are 32-bit: about 13 hours of mono speech.
     i32::try_from(lip::position(audio.len() as i64))
         .map_err(|_| fail(1, format!("{}: too long for a lip file", sound.display())))?;
-    let l = lipgen::generate(&name, &audio, tokens.as_deref(), &lipgen::Params::default());
+    let (l, source) = lipgen::generate(&name, &audio, tokens.as_deref(), &lipgen::Params::default());
+    if tokens.is_some() && source == lipgen::Source::Sound {
+        eprintln!(
+            "{}: its text has more sounds than the speech has room for; lip sync from the audio only",
+            sound.display()
+        );
+    }
     let out = a.output.clone().unwrap_or_else(|| sound.with_extension("lip"));
     let replaced = out.exists();
     replace_file(&out, &l.to_bytes()).map_err(|e| fail(1, format!("{}: {e}", out.display())))?;

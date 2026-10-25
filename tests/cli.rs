@@ -608,6 +608,27 @@ fn lip_uses_a_transcript_beside_the_sound() {
 }
 
 #[test]
+fn lip_says_when_a_transcript_is_too_long_for_its_sound() {
+    let d = Dir::new();
+    let src = d.path("x.acm");
+    put(&src, &speech(), OutputFormat::Acm);
+    std::fs::write(
+        d.path("x.txt"),
+        "the quick brown fox jumps over the lazy dog ".repeat(4),
+    )
+    .unwrap();
+    let out = ipsdoc(&["lip", s(&src)]);
+    ok(&out);
+    assert!(
+        all_output(&out)
+            .contains("x.acm: its text has more sounds than the speech has room for; lip sync from the audio only"),
+        "{}",
+        all_output(&out)
+    );
+    assert!(d.path("x.lip").exists());
+}
+
+#[test]
 fn lip_fails_on_a_transcript_it_cannot_read() {
     let d = Dir::new();
     let src = d.path("x.acm");

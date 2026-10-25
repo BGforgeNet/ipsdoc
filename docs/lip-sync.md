@@ -6,8 +6,8 @@
   letter-to-sound rules for words it lacks, and are placed on the speech by a forced alignment against a model of how
   each sound sounds and how long it lasts, fitted to Fallout 2's own voiced lines. The dialog `.msg` names each line's
   sound: `ipsdoc lip --msg dialog/nhmyron.msg myn1003a.acm`. Without text, the same model picks the likeliest run of
-  sounds from the sound alone. The model judges each 10 ms by its loudness and its spectrum (mel-frequency cepstral
-  coefficients).
+  sounds from the sound alone; so it does, and says so, when the text has more sounds than its speech has room for. The
+  model judges each 10 ms by its loudness and its spectrum (mel-frequency cepstral coefficients).
 - **Checks.** A lip file names the sound the game loads for it, and should end with that sound; `check` reports a name
   mismatch, phoneme codes the original game misreads (42 and up), and markers out of order. A lip file ending off its
   sound by under 50 ms passes, as no player sees it; up to 150 ms is a warning; more, or a length 2 or 4 times off (made

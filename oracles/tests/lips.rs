@@ -157,8 +157,8 @@ fn score_half(dirs: &[PathBuf], text: &HashMap<String, String>, wav2lip: &Path, 
             *h.skipped.entry("original does not fit its sound").or_default() += 1;
             continue;
         }
-        let ours_text = generate(&name, &audio, Some(&tokens(line)), &p);
-        let ours_audio = generate(&name, &audio, None, &p);
+        let (ours_text, _) = generate(&name, &audio, Some(&tokens(line)), &p);
+        let (ours_audio, _) = generate(&name, &audio, None, &p);
         let w2l = Lip::parse(&w2l_bytes).unwrap_or_else(|e| panic!("wav2lip {name}: {e}"));
         // Ours must always be valid and fit.
         let ours_ok = usable(&name, "ours (text)", &ours_text, &audio, &mut h.failures)
