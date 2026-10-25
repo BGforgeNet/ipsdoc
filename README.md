@@ -152,7 +152,8 @@ myn1003a.lip: last marker 327380 -> 654760
 
 ### Installing
 
-Download the archive for your system from the [releases page](https://github.com/BGforgeNet/ipsdoc/releases) and run the
-binary in it from anywhere.
+Download the binary for your system from the [releases page](https://github.com/BGforgeNet/ipsdoc/releases) and run it
+from anywhere: `ipsdoc` (Linux x86_64), `ipsdoc-arm64` (Linux ARM64), `ipsdoc.exe` (Windows 64-bit), `ipsdoc-win32.exe`
+(Windows 32-bit), `ipsdoc-macos` (macOS). On Linux and macOS, make it executable first: `chmod +x ipsdoc`.
 
 Or [build it from source](docs/building.md).

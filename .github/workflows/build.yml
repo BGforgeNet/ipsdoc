@@ -139,22 +139,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # `asset`: the binary's name on the release page.
           - target: x86_64-unknown-linux-musl
             rust-targets: x86_64-unknown-linux-musl
             exe: ipsdoc
+            asset: ipsdoc
           - target: aarch64-unknown-linux-musl
             rust-targets: aarch64-unknown-linux-musl
             exe: ipsdoc
+            asset: ipsdoc-arm64
           - target: x86_64-pc-windows-gnu
             rust-targets: x86_64-pc-windows-gnu
             exe: ipsdoc.exe
+            asset: ipsdoc.exe
           - target: i686-pc-windows-gnu
             rust-targets: i686-pc-windows-gnu
             exe: ipsdoc.exe
+            asset: ipsdoc-win32.exe
           # Not a rustup target: cargo-zigbuild builds the two it names and merges them.
           - target: universal2-apple-darwin
             rust-targets: x86_64-apple-darwin aarch64-apple-darwin
             exe: ipsdoc
+            asset: ipsdoc-macos
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -169,16 +175,36 @@ jobs:
       - run: .github/scripts/install-zig.sh
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
-          tool: cargo-about@0.9.2,cargo-zigbuild@0.23.4
+          tool: cargo-zigbuild@0.23.4
       - run: rustup target add ${{ matrix.rust-targets }}
       - run: cargo zigbuild -p ipsdoc --release --locked --target ${{ matrix.target }}
-      - run: .github/scripts/build-dist.sh
+      - run: mkdir dist && cp "target/$TARGET/release/$EXE" "dist/$ASSET"
         env:
           TARGET: ${{ matrix.target }}
           EXE: ${{ matrix.exe }}
+          ASSET: ${{ matrix.asset }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ipsdoc-${{ matrix.target }}
+          path: dist
+          if-no-files-found: error
+
+  # The licences the binaries ship with, published beside them. One set serves every binary: about.toml lists all
+  # their targets.
+  notices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-about@0.9.2
+      - run: .github/scripts/build-notices.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: notices
           path: dist
           if-no-files-found: error
 
@@ -193,22 +219,22 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            exe: ipsdoc
+            asset: ipsdoc
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            exe: ipsdoc
+            asset: ipsdoc-arm64
           - os: windows-latest
             target: x86_64-pc-windows-gnu
-            exe: ipsdoc.exe
+            asset: ipsdoc.exe
           - os: windows-latest
             target: i686-pc-windows-gnu
-            exe: ipsdoc.exe
+            asset: ipsdoc-win32.exe
           - os: macos-26
             target: universal2-apple-darwin
-            exe: ipsdoc
+            asset: ipsdoc-macos
           - os: macos-26-intel
             target: universal2-apple-darwin
-            exe: ipsdoc
+            asset: ipsdoc-macos
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     defaults:
@@ -223,26 +249,30 @@ jobs:
           name: ipsdoc-${{ matrix.target }}
           path: ${{ runner.temp }}/dist
       # Artifacts do not keep the executable bit.
-      - run: chmod +x "$RUNNER_TEMP/dist/${{ matrix.exe }}" && tests/smoke.sh "$RUNNER_TEMP/dist/${{ matrix.exe }}"
+      - run: chmod +x "$RUNNER_TEMP/dist/${{ matrix.asset }}" && tests/smoke.sh "$RUNNER_TEMP/dist/${{ matrix.asset }}"
 
   # Read-only everywhere else; only publishing a tag's release writes.
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [lint, test, oracles, cross-tools, build, smoke]
+    needs: [lint, test, oracles, cross-tools, build, notices, smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
+      # The binaries under their release names, and the licences.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: ipsdoc-*
           path: dist
-      # Artifacts do not keep the executable bit, and zip stores the mode each file has.
-      - run: chmod +x dist/ipsdoc-*/ipsdoc
+          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: notices
+          path: dist
+      # A checksum list, so a download can be verified.
       - run: |
-          cd dist
-          for d in ipsdoc-*; do (cd "$d" && zip -q -r "../$d.zip" .); done
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes ./*.zip
+          cd dist && sha256sum -- * >SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes ./*
         env:
           GH_TOKEN: ${{ github.token }}
