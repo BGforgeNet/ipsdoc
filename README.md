@@ -74,9 +74,6 @@ ipsdoc myn1003a.acm
 # WAV to ACM (lossless)
 ipsdoc myn1003a.wav myn1003a.acm
 
-# To Ogg Vorbis, at a higher quality than the default 5
-ipsdoc --quality 8 myn1003a.acm myn1003a.ogg
-
 # Resample to 44100 Hz
 ipsdoc --rate 44100 myn1003a.acm myn1003a-44k.acm
 ```
