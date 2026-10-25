@@ -912,7 +912,8 @@ fn lip_one(sound: &Path, a: &LipArgs, entries: Option<&[msg::Entry]>) -> Result<
         eprintln!("{}: no text for it; lip sync from the audio only", sound.display());
     }
     // Positions are 32-bit: about 13 hours of mono speech.
-    i32::try_from(2 * audio.len()).map_err(|_| fail(1, format!("{}: too long for a lip file", sound.display())))?;
+    i32::try_from(lip::position(audio.len() as i64))
+        .map_err(|_| fail(1, format!("{}: too long for a lip file", sound.display())))?;
     let l = lipgen::generate(&name, &audio, tokens.as_deref(), &lipgen::Params::default());
     let out = a.output.clone().unwrap_or_else(|| sound.with_extension("lip"));
     let replaced = out.exists();
@@ -928,8 +929,8 @@ fn rescale_lip(path: &Path, sound: &Path) -> Result<(), Failure> {
     let audio = input::read(&read_file(sound)?, &ReadOptions::default())
         .map_err(|e| fail(1, format!("{}: {}", sound.display(), chain(&e))))?
         .audio;
-    let new_last =
-        i32::try_from(2 * audio.len()).map_err(|_| fail(1, format!("{}: too long for a lip file", sound.display())))?;
+    let new_last = i32::try_from(lip::position(audio.len() as i64))
+        .map_err(|_| fail(1, format!("{}: too long for a lip file", sound.display())))?;
     let old = l.last();
     l.rescale(new_last);
     replace_file(path, &l.to_bytes()).map_err(|e| fail(1, format!("{}: {e}", path.display())))?;

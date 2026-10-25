@@ -25,12 +25,23 @@ pub const PHONEME_COUNT: u8 = 42;
 /// With this many markers or fewer the engine logs "Too few markers to stop speech" and skips its wrap check.
 pub const FEW_MARKERS: usize = 5;
 /// The head frame the engine shows for each phoneme code.
-pub const HEAD_FRAME: [u8; PHONEME_COUNT as usize] = [
+const HEAD_FRAME: [u8; PHONEME_COUNT as usize] = [
     0, 3, 1, 1, 3, 1, 1, 1, 7, 8, 7, 3, 1, 8, 1, 7, 7, 6, 6, 2, 2, 2, 2, 4, 4, 5, 5, 2, 2, 2, 2, 2, 6, 2, 2, 5, 8, 2,
     2, 2, 2, 8,
 ];
 /// The head frame of closed lips: m, p, b.
 pub const CLOSED: u8 = 6;
+
+/// The head frame the engine shows for phoneme `code`: the resting mouth, 0, for a code past [`PHONEME_COUNT`], as
+/// Fallout 2 CE reads it.
+pub fn head_frame(code: u8) -> u8 {
+    HEAD_FRAME.get(usize::from(code)).copied().unwrap_or(0)
+}
+
+/// The position of interleaved sample `sample` of the decoded sound: 2 bytes a sample.
+pub const fn position(sample: i64) -> i64 {
+    2 * sample
+}
 
 /// A lip-sync file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -228,7 +239,7 @@ impl Fit {
 /// How `last` (a lip file's last marker) fits `sound`: within 0.01% or 2 bytes, whichever is more (resampling
 /// rounds the sample count).
 pub fn fit(last: i32, sound: &Audio) -> Fit {
-    let want = 2.0 * sound.len() as f64;
+    let want = position(sound.len() as i64) as f64;
     let last = f64::from(last);
     let near = |a: f64, b: f64| (a - b).abs() <= (b * 1e-4).max(2.0);
     if near(last, want) {
@@ -464,6 +475,14 @@ mod tests {
 
     fn marker(kind: i32, position: i32) -> Marker {
         Marker { kind, position }
+    }
+
+    #[test]
+    fn a_code_the_engine_does_not_know_shows_the_resting_mouth() {
+        assert_eq!(head_frame(32), CLOSED);
+        assert_eq!(head_frame(PHONEME_COUNT - 1), 8);
+        assert_eq!(head_frame(PHONEME_COUNT), 0);
+        assert_eq!(head_frame(u8::MAX), 0);
     }
 
     /// Six markers, five shapes, for a sound of 1000 samples.

@@ -498,7 +498,7 @@ mod tests {
         };
         // Head frames 0 and 6 are the resting and the closed mouth: any other is open.
         assert!(
-            ![0, crate::lip::CLOSED].contains(&crate::lip::HEAD_FRAME[usize::from(vowel)]),
+            ![0, crate::lip::CLOSED].contains(&crate::lip::head_frame(vowel)),
             "{got:?}"
         );
         // Over part of the line, only that part.

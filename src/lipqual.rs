@@ -8,7 +8,7 @@
 use std::fmt;
 
 use crate::g2p::{Arpabet, Token};
-use crate::lip::{CLOSED, HEAD_FRAME, Lip, PHONEME_COUNT, Severity};
+use crate::lip::{self, CLOSED, Lip, PHONEME_COUNT, Severity};
 use crate::pcm::Audio;
 use crate::speech::{self, SpeechParams, frame_start};
 
@@ -457,16 +457,12 @@ pub fn head_frames(l: &Lip, audio: &Audio, frames: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(frames);
     let mut m = 0;
     for f in 0..frames {
-        let position = i64::try_from(2 * frame_start(f, audio.rate) * channels).unwrap_or(i64::MAX);
+        // A frame start past i64 lies beyond any marker.
+        let position = i64::try_from(frame_start(f, audio.rate) * channels).map_or(i64::MAX, lip::position);
         while m + 1 < l.markers.len() && i64::from(l.markers[m + 1].position) <= position {
             m += 1;
         }
-        let code = l.phonemes.get(m).copied().unwrap_or(0);
-        out.push(if code < PHONEME_COUNT {
-            HEAD_FRAME[usize::from(code)]
-        } else {
-            0
-        });
+        out.push(lip::head_frame(l.phonemes.get(m).copied().unwrap_or(0)));
     }
     out
 }

@@ -516,7 +516,7 @@ fn lip_at(path: &Path) -> ipsdoc::lip::Lip {
 fn closes_lips(lip: &ipsdoc::lip::Lip) -> bool {
     lip.phonemes
         .iter()
-        .any(|&c| ipsdoc::lip::HEAD_FRAME[usize::from(c)] == ipsdoc::lip::CLOSED)
+        .any(|&c| ipsdoc::lip::head_frame(c) == ipsdoc::lip::CLOSED)
 }
 
 fn all_output(out: &Output) -> String {

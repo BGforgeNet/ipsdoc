@@ -5,7 +5,7 @@
 //! merge, shapes are held a minimum time, changes are capped per second, and pauses show the silent mouth.
 
 use crate::g2p::Token;
-use crate::lip::{self, CLOSED, HEAD_FRAME, Lip, Marker};
+use crate::lip::{self, CLOSED, Lip, Marker};
 use crate::lipalign;
 use crate::pcm::Audio;
 use crate::speech::{self, SpeechParams};
@@ -83,7 +83,7 @@ struct Shape {
 
 impl Shape {
     fn frame(self) -> u8 {
-        HEAD_FRAME[usize::from(self.code.min(lip::PHONEME_COUNT - 1))]
+        lip::head_frame(self.code)
     }
 }
 
@@ -195,10 +195,10 @@ fn remove(v: &mut Vec<Shape>, i: usize, total: f64) {
 /// six markers.
 fn to_lip(name: &str, audio: &Audio, shapes: &[Shape]) -> Lip {
     let channels = i64::from(audio.channels);
-    let last = 2 * audio.len() as i64;
+    let last = lip::position(audio.len() as i64);
     let position = |t: f64| -> i32 {
         let frame = (t * f64::from(audio.rate) / f64::from(speech::FRAMES_PER_SECOND)).round() as i64;
-        (2 * channels * frame).clamp(0, last) as i32
+        lip::position(channels * frame).clamp(0, last) as i32
     };
     let mut phonemes: Vec<u8> = shapes.iter().map(|s| s.code).collect();
     let mut markers: Vec<Marker> = shapes
@@ -243,7 +243,7 @@ mod tests {
     fn frame_at(lip: &Lip, secs: f32) -> u8 {
         let pos = 2 * (secs * RATE as f32) as i32;
         let i = lip.markers.iter().rposition(|m| m.position <= pos).unwrap_or(0);
-        HEAD_FRAME[usize::from(lip.phonemes.get(i).copied().unwrap_or(0).min(lip::PHONEME_COUNT - 1))]
+        lip::head_frame(lip.phonemes.get(i).copied().unwrap_or(0))
     }
 
     /// Each shape's head frame and length in seconds.
@@ -253,7 +253,7 @@ mod tests {
             .zip(lip.markers.windows(2))
             .map(|(&c, w)| {
                 (
-                    HEAD_FRAME[usize::from(c)],
+                    lip::head_frame(c),
                     (w[1].position - w[0].position) as f32 / 2.0 / RATE as f32,
                 )
             })
@@ -295,7 +295,7 @@ mod tests {
             .phonemes
             .iter()
             .zip(&lip.markers)
-            .filter(|&(&c, _)| HEAD_FRAME[usize::from(c)] == CLOSED)
+            .filter(|&(&c, _)| lip::head_frame(c) == CLOSED)
             .map(|(_, m)| f64::from(m.position) / 2.0 / f64::from(RATE) + lead)
             .collect();
         assert_eq!(closed.len(), 2, "{lip:?}");
