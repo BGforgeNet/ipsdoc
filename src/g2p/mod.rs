@@ -143,7 +143,7 @@ pub enum Token {
     Noise,
 }
 
-/// The Fallout phoneme code for a phone, as Interplay's own lip files use them (the spec's ARPAbet table).
+/// The Fallout phoneme code for a phone: the code Interplay's own lip files give each ARPAbet sound.
 pub fn code(p: Phone) -> u8 {
     use Arpabet::*;
     match p.sound {

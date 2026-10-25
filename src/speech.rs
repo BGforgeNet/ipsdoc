@@ -79,7 +79,7 @@ const MIN_RANGE: f32 = 30.0;
 /// The low band's corner (Hz).
 const LOW_HZ: f32 = 1000.0;
 /// The cepstrum's window (seconds), mel bands and their span (Hz): the usual speech settings, the top kept under the
-/// Nyquist frequency of 16 kHz audio so every rate gives the same coefficients.
+/// Nyquist frequency of 16 kHz audio so every rate from 16 kHz up gives the same coefficients.
 const CEP_WINDOW: f32 = 0.025;
 const MEL_BANDS: usize = 24;
 const MEL_LOW_HZ: f32 = 100.0;
@@ -143,7 +143,7 @@ fn cepstra(mono: &[f32], rate: u32, count: usize) -> Vec<[f32; CEPSTRA]> {
     let len = ((CEP_WINDOW * rate as f32).round() as usize).max(2);
     let size = len.next_power_of_two();
     let fft = realfft::RealFftPlanner::<f32>::new().plan_fft_forward(size);
-    let (mut input, mut spectrum) = (fft.make_input_vec(), fft.make_output_vec());
+    let (mut input, mut spectrum, mut scratch) = (fft.make_input_vec(), fft.make_output_vec(), fft.make_scratch_vec());
     let window: Vec<f32> = (0..len)
         .map(|i| 0.54 - 0.46 * (TAU * i as f32 / (len - 1) as f32).cos())
         .collect();
@@ -183,7 +183,8 @@ fn cepstra(mono: &[f32], rate: u32, count: usize) -> Vec<[f32; CEPSTRA]> {
                     input[i] = w * emphasised(j);
                 }
             }
-            fft.process(&mut input, &mut spectrum).expect("buffers from the plan");
+            fft.process_with_scratch(&mut input, &mut spectrum, &mut scratch)
+                .expect("buffers from the plan");
             let logs: [f32; MEL_BANDS] = std::array::from_fn(|m| {
                 bands[m]
                     .iter()
