@@ -6,6 +6,10 @@ as RIFF WAV and Ogg Vorbis files.
 Also writes and checks Fallout's lip-sync files.
 
 - [Commands](#commands)
+  - [`ipsdoc convert`](#ipsdoc-convert)
+  - [`ipsdoc info`, `ipsdoc check`](#ipsdoc-info-ipsdoc-check)
+  - [`ipsdoc repair`](#ipsdoc-repair)
+  - [`ipsdoc lip`](#ipsdoc-lip)
 - [Examples](#examples)
   - [Convert](#convert)
   - [Infinity Engine](#infinity-engine)
@@ -18,26 +22,46 @@ Also writes and checks Fallout's lip-sync files.
 
 ### Commands
 
-- `ipsdoc convert IN [OUT]`, or `ipsdoc IN [OUT]`: converts between ACM, WAVC, WAV and Ogg Vorbis.
-- `ipsdoc info FILE...`: shows a file's headers, how it reads, and what in them is wrong.
-- `ipsdoc check PATH...`: decodes sounds and checks lip files, directories recursively.
-- `ipsdoc repair FILE...`: fixes wrong header fields in place, without re-encoding.
-- `ipsdoc lip SOUND...`: writes Fallout lip-sync files, from each line's text or from the sound alone.
-- `ipsdoc lip --rescale LIP --for SOUND`: fits a lip file to another rate or channel count of its sound.
+`ipsdoc --help` and `ipsdoc <command> --help` list every option.
 
-`convert` options: `--to acm|wavc|wav|ogg` (otherwise from the output's extension), `--rate R` (resample),
-`--channels N` and `--input-rate R` (read the input as having these, whatever its header says; the samples stay as they
-are), `--quality Q` (Vorbis, -1 to 10, default 5), `--raw` with `--raw-rate`, `--raw-channels`, `--raw-bits` (headerless
-PCM, instead of `--channels` and `--input-rate`), `--wrap` (see `docs/quirks.md`), `--full-depth` (a WAV keeps a depth
-beyond 16 bits; Infinity Engine games read WAV up to 16-bit).
+#### `ipsdoc convert`
 
-`repair` options: `--rate R` and `--channels N` (store these in each ACM and WAVC header named, over what the content
-says, as the samples cannot tell an ACM's rate; a lip file named with them fails), `--dry-run`.
+`ipsdoc convert IN [OUT]`, or `ipsdoc IN [OUT]`: converts between ACM, WAVC, WAV and Ogg Vorbis.
 
-`info` and `check` take `--msg DIALOG`, dialog `.msg` files or directories of them, to judge lip files against each
-line's words. `lip` takes `--msg FILE`, the dialog file holding each sound's line (without it, a `.txt` transcript
-beside the sound, else the sound alone), and `-o LIP` for a single sound. `ipsdoc --help` and `ipsdoc <command> --help`
-list everything.
+- `--to acm|wavc|wav|ogg`: the output format; otherwise from the output's extension.
+- `--rate R`: resample.
+- `--channels N`, `--input-rate R`: read the input as having these, whatever its header says; the samples stay as they
+  are.
+- `--quality Q`: Vorbis quality, -1 to 10, default 5.
+- `--raw` with `--raw-rate`, `--raw-channels`, `--raw-bits`: headerless PCM, instead of `--channels` and `--input-rate`.
+- `--wrap`: see `docs/quirks.md`.
+- `--full-depth`: a WAV keeps a depth beyond 16 bits; Infinity Engine games read WAV up to 16-bit.
+
+#### `ipsdoc info`, `ipsdoc check`
+
+`ipsdoc info FILE...`: shows a file's headers, how it reads, and what in them is wrong.
+
+`ipsdoc check PATH...`: decodes sounds and checks lip files, directories recursively.
+
+- `--msg DIALOG`: dialog `.msg` files or directories of them, to judge lip files against each line's words.
+
+#### `ipsdoc repair`
+
+`ipsdoc repair FILE...`: fixes wrong header fields in place, without re-encoding.
+
+- `--rate R`, `--channels N`: store these in each ACM and WAVC header named, over what the content says, as the samples
+  cannot tell an ACM's rate; a lip file named with them fails.
+- `--dry-run`: show the fixes without writing them.
+
+#### `ipsdoc lip`
+
+`ipsdoc lip SOUND...`: writes Fallout lip-sync files, from each line's text or from the sound alone.
+
+`ipsdoc lip --rescale LIP --for SOUND`: fits a lip file to another rate or channel count of its sound.
+
+- `--msg FILE`: the dialog file holding each sound's line; without it, a `.txt` transcript beside the sound, else the
+  sound alone.
+- `-o LIP`: where to write, for a single sound.
 
 ### Examples
 
