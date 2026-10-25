@@ -87,8 +87,8 @@ fn voiced_lines(dialog: &Path) -> HashMap<String, String> {
     let mut text = HashMap::new();
     for e in std::fs::read_dir(dialog).unwrap() {
         let p = e.unwrap().path();
-        let entries =
-            ipsdoc::msg::parse(&std::fs::read(&p).unwrap()).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+        let entries = ipsdoc::msg::parse(&std::fs::read(&p).unwrap(), ipsdoc::language::Language::English)
+            .unwrap_or_else(|e| panic!("{}: {e}", p.display()));
         for x in entries.into_iter().filter(|x| !x.sound.is_empty()) {
             text.entry(x.sound.to_ascii_lowercase()).or_insert(x.text);
         }

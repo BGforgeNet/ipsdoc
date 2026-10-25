@@ -13,6 +13,8 @@ allow = [
     "BSD-3-Clause",
     "MPL-2.0",
     "Unicode-3.0",
+    "ISC",
+    "CDLA-Permissive-2.0",
 ]
 
 [bans]
@@ -26,6 +28,12 @@ skip = [
     # rubato's `visibility` macro is still on syn 2 while thiserror is on syn 3; a proc-macro dependency, built for
     # the host only, so nothing of either ships in the binary.
     { crate = "syn@2.0.119", reason = "build-time only, via rubato's visibility macro" },
+    # ring, the TLS cryptography that needs no cmake to cross-build, has no release past these.
+    { crate = "getrandom@0.2.17", reason = "ring's; vorbis_rs is on 0.4" },
+    { crate = "windows-sys@0.52.0", reason = "ring's; the rest of the tree is on 0.61" },
+    # espeak-ng 0.2.0, the only pure-Rust eSpeak, is still on thiserror 1.
+    { crate = "thiserror@1.0.69", reason = "espeak-ng's; ipsdoc is on 2" },
+    { crate = "thiserror-impl@1.0.69", reason = "espeak-ng's; ipsdoc is on 2" },
 ]
 
 [sources]

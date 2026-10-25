@@ -1,6 +1,10 @@
 //! Fallout message files (`.msg`): entries `{number}{sound}{text}`, where a voiced line's sound field names its
 //! speech file. Text outside braces (comments, blank lines) is ignored; an entry's text may span lines.
 
+use unicode_normalization::UnicodeNormalization;
+
+use crate::language::Language;
+
 /// One entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
@@ -46,13 +50,13 @@ pub struct Found<'a> {
     pub conflicting: bool,
 }
 
-/// Reads a message file, as Windows-1252 (the code page of the English game's files).
+/// Reads a message file in `language`'s code page.
 ///
 /// # Errors
 ///
 /// When a field is unterminated, an entry is short, or an entry number is not a number.
-pub fn parse(bytes: &[u8]) -> Result<Vec<Entry>, MsgError> {
-    let text = decode(bytes);
+pub fn parse(bytes: &[u8], language: Language) -> Result<Vec<Entry>, MsgError> {
+    let text = decode(bytes, language);
     // Each field with the line it starts on.
     let mut fields: Vec<(usize, String)> = Vec::new();
     let mut line = 1;
@@ -98,23 +102,11 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Entry>, MsgError> {
     Ok(entries)
 }
 
-/// Text in the English game's code page, Windows-1252 (message files, and the transcripts beside speech files).
-pub fn decode(bytes: &[u8]) -> String {
-    bytes.iter().map(|&b| windows_1252(b)).collect()
-}
-
-/// A Windows-1252 byte as a character; its five unassigned bytes read as the C1 controls of the same value.
-fn windows_1252(b: u8) -> char {
-    const HIGH: [char; 32] = [
-        '\u{20AC}', '\u{81}', '\u{201A}', '\u{192}', '\u{201E}', '\u{2026}', '\u{2020}', '\u{2021}', '\u{2C6}',
-        '\u{2030}', '\u{160}', '\u{2039}', '\u{152}', '\u{8D}', '\u{17D}', '\u{8F}', '\u{90}', '\u{2018}', '\u{2019}',
-        '\u{201C}', '\u{201D}', '\u{2022}', '\u{2013}', '\u{2014}', '\u{2DC}', '\u{2122}', '\u{161}', '\u{203A}',
-        '\u{153}', '\u{9D}', '\u{17E}', '\u{178}',
-    ];
-    match b {
-        0x80..=0x9F => HIGH[usize::from(b - 0x80)],
-        _ => char::from(b),
-    }
+/// Text in `language`'s code page (message files, and the transcripts beside speech files). Windows-1252's five
+/// unassigned bytes read as the C1 controls of the same value. Composed (NFC), as cp1258 writes Vietnamese tones as
+/// combining marks.
+pub fn decode(bytes: &[u8], language: Language) -> String {
+    language.encoding().decode_without_bom_handling(bytes).0.nfc().collect()
 }
 
 /// The entry whose sound field is `sound`, case-insensitively.
@@ -131,6 +123,24 @@ pub fn find<'a>(entries: &'a [Entry], sound: &str) -> Option<Found<'a>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An English file, as most tests read.
+    fn parse(bytes: &[u8]) -> Result<Vec<Entry>, MsgError> {
+        super::parse(bytes, Language::English)
+    }
+
+    #[test]
+    fn decodes_each_language_in_its_code_page() {
+        // "Гут" in cp1251, as UPU's russian/dialog files are written; the same bytes read as cp1252 are mojibake.
+        let bytes = b"{1}{a}{\xc3\xf3\xf2}";
+        assert_eq!(super::parse(bytes, Language::Russian).unwrap()[0].text, "Гут");
+        assert_eq!(parse(bytes).unwrap()[0].text, "Ãóò");
+        // "Bạn" in cp1258: an a, then the dot below as a combining mark, composed on reading.
+        assert_eq!(
+            super::parse(b"{1}{a}{Ba\xf2n}", Language::Vietnamese).unwrap()[0].text,
+            "B\u{1ea1}n"
+        );
+    }
 
     // From the Unofficial Patch's data/text/english/dialog/vccasidy.msg (CRLF, as there) and zcbrahmn.msg.
     const CASSIDY: &[u8] = b"{101}{}{You see Cassidy.}\r\n\

@@ -1,6 +1,8 @@
 //! English text to Fallout lip-sync phonemes.
 
 mod dict;
+pub mod espeak;
+pub mod ipa;
 mod nrl;
 mod text;
 
@@ -209,6 +211,29 @@ pub fn tokens(text: &str) -> Vec<Token> {
         })
         .filter(|t| !matches!(t, Token::Word(p) | Token::Drawn(p) if p.is_empty()))
         .collect()
+}
+
+/// How a language's lines become tokens: English by the built-in dictionary and rules, the translations by eSpeak.
+#[derive(Debug)]
+pub enum Pronouncer {
+    /// English.
+    English,
+    /// A translation.
+    Espeak(Box<espeak::Espeak>),
+}
+
+impl Pronouncer {
+    /// A line of dialog as tokens.
+    ///
+    /// # Errors
+    ///
+    /// When eSpeak fails on the line, or writes a symbol ipsdoc does not map.
+    pub fn tokens(&self, text: &str) -> Result<Vec<Token>, espeak::EspeakError> {
+        match self {
+            Pronouncer::English => Ok(tokens(text)),
+            Pronouncer::Espeak(e) => e.tokens(text),
+        }
+    }
 }
 
 /// `written`'s phonemes as a word, drawn out when it runs three or more of a letter.

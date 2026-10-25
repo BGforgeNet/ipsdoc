@@ -1,7 +1,17 @@
 # Third-party notices for the shipped binary (`cargo about generate`, run by the notices job). Dev and build
 # dependencies never ship; neither do crates for other targets.
 # The same list as `allow` in deny.toml, which the gate checks: change both together.
-accepted = ["GPL-3.0-only", "GPL-3.0-or-later", "MIT", "Apache-2.0", "BSD-3-Clause", "MPL-2.0", "Unicode-3.0"]
+accepted = [
+  "GPL-3.0-only",
+  "GPL-3.0-or-later",
+  "MIT",
+  "Apache-2.0",
+  "BSD-3-Clause",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "ISC",
+  "CDLA-Permissive-2.0",
+]
 ignore-dev-dependencies = true
 ignore-build-dependencies = true
 targets = [

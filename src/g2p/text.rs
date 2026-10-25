@@ -63,9 +63,80 @@ const NOISE: char = '\u{1}';
 /// Abbreviations said as words, when a full stop follows them.
 const ABBREVIATIONS: &[(&str, &str)] = &[("DR", "DOCTOR"), ("MR", "MISTER"), ("MRS", "MISSUS"), ("MS", "MIZ")];
 
+/// The German dialogs' bracketed noises (`(hick)`, `*schnief*`, `(Seufz)`), and the infinitives and third persons of
+/// the same, upper case.
+pub(super) const GERMAN_NOISES: &[&str] = &[
+    "ÄH",
+    "ÄHM",
+    "GÄHN",
+    "GÄHNT",
+    "GRUNZ",
+    "GRUNZT",
+    "HA",
+    "HAH",
+    "HEH",
+    "HICK",
+    "HM",
+    "HMM",
+    "HUST",
+    "HUSTEN",
+    "HUSTET",
+    "KEUCH",
+    "KEUCHT",
+    "KICHER",
+    "KICHERT",
+    "LACH",
+    "LACHT",
+    "LACHEN",
+    "MURMEL",
+    "MURMELT",
+    "RÄUSPER",
+    "RÄUSPERT",
+    "SCHLUCHZ",
+    "SCHLUCHZT",
+    "SCHLUCK",
+    "SCHLUCKT",
+    "SCHNAUB",
+    "SCHNAUBT",
+    "SCHNIEF",
+    "SCHNIEFT",
+    "SCHREI",
+    "SCHREIT",
+    "SEUFZ",
+    "SEUFZT",
+    "SEUFZER",
+    "STÖHN",
+    "STÖHNT",
+];
+
 /// Normalises a line of dialog.
 pub(super) fn normalise(text: &str) -> Vec<Piece> {
-    tokenise(&brackets(&fold(text)))
+    tokenise(&brackets(&fold(text), NOISES))
+}
+
+/// A piece of a line another language's pronouncer reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Segment {
+    /// Text as written: the pronouncer reads its numbers, abbreviations and punctuation itself.
+    Text(String),
+    /// A bracketed vocal noise.
+    Noise,
+}
+
+/// A line in another language: stage directions dropped and bracketed noises (`noises`, upper case) marked, the rest
+/// left as written.
+pub(super) fn segments(text: &str, noises: &[&str]) -> Vec<Segment> {
+    let marked = brackets(text, noises);
+    let mut out = Vec::new();
+    for (i, part) in marked.split(NOISE).enumerate() {
+        if i > 0 {
+            out.push(Segment::Noise);
+        }
+        if !part.trim().is_empty() {
+            out.push(Segment::Text(part.trim().to_owned()));
+        }
+    }
+    out
 }
 
 /// Typographic punctuation to ASCII, accented Latin letters to plain ones, anything else non-ASCII to a blank.
@@ -94,9 +165,9 @@ fn fold(text: &str) -> String {
     out
 }
 
-/// `(...)` and `[...]` become a noise when they hold only [`NOISES`], else nothing; `*...*` becomes a noise, or stays
+/// `(...)` and `[...]` become a noise when they hold only `noises`, else nothing; `*...*` becomes a noise, or stays
 /// as text (emphasis).
-fn brackets(text: &str) -> String {
+fn brackets(text: &str, noises: &[&str]) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(i) = rest.find(['(', '[', '*']) {
@@ -118,11 +189,11 @@ fn brackets(text: &str) -> String {
             }
         };
         let words: Vec<String> = inner
-            .split(|c: char| !c.is_ascii_alphabetic())
+            .split(|c: char| !c.is_alphabetic())
             .filter(|w| !w.is_empty())
-            .map(str::to_ascii_uppercase)
+            .map(str::to_uppercase)
             .collect();
-        if !words.is_empty() && words.iter().all(|w| NOISES.contains(&w.as_str())) {
+        if !words.is_empty() && words.iter().all(|w| noises.contains(&w.as_str())) {
             out.push(' ');
             out.push(NOISE);
             out.push(' ');
@@ -388,6 +459,20 @@ mod tests {
         assert_eq!(words("the NCR and REAL whiskey"), "THE <NCR> AND <REAL> WHISKEY");
         assert_eq!(words("I"), "I", "a lone capital is a word");
         assert_eq!(words("caf\u{e9}"), "CAFE");
+    }
+
+    #[test]
+    fn segments_for_another_language() {
+        use Segment::{Noise, Text};
+        let text = |s: &str| Text(s.to_owned());
+        // German dialog lines: a noise kept, a direction dropped, numbers and umlauts left to the pronouncer.
+        assert_eq!(
+            segments("(hick) Na gut. *Schnief* Für 21 Kronkorken?", GERMAN_NOISES),
+            vec![Noise, text("Na gut."), Noise, text("Für 21 Kronkorken?")]
+        );
+        assert_eq!(segments("(Runzelt die Stirn.) Gut.", GERMAN_NOISES), vec![text("Gut.")]);
+        assert_eq!(segments("*ich* bin", GERMAN_NOISES), vec![text("ich bin")]);
+        assert_eq!(segments("", GERMAN_NOISES), vec![]);
     }
 
     #[test]

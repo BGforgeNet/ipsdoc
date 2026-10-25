@@ -23,6 +23,7 @@ Also writes and checks Fallout's lip-sync files.
 `ipsdoc info FILE...`: shows a file's headers, how it reads, and what in them is wrong.
 
 - `--msg DIALOG`: dialog `.msg` files or directories of them, to judge lip files against each line's words.
+- `--lang L`: their language, as for [lip](#lip).
 
 A Fallout 2 speech file whose header claims stereo:
 
@@ -52,6 +53,7 @@ lang/en_US/sounds/bdtpag0.wav: ogg
 `ipsdoc check PATH...`: decodes sounds and checks lip files, directories recursively.
 
 - `--msg DIALOG`: dialog `.msg` files or directories of them, to judge lip files against each line's words.
+- `--lang L`: their language, as for [lip](#lip).
 
 Every sound and lip file in a directory, recursively; every sound in a mod, or in a game's music:
 
@@ -134,6 +136,8 @@ myn1003a.acm: ACM channels 2 -> 1
 
 - `--msg FILE`: the dialog file holding each sound's line; without it, a `.txt` transcript beside the sound, else the
   sound alone.
+- `--lang L`: the line's language, English by default. [Other languages](docs/lip-sync.md) download their pronunciation
+  data once.
 - `-o LIP`: where to write, for a single sound.
 
 ```console

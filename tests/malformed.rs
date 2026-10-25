@@ -62,7 +62,7 @@ fn read_all(bytes: &[u8]) {
     if let Ok(l) = Lip::parse(bytes) {
         let _ = l.validate(Some("x"));
     }
-    if let Ok(entries) = msg::parse(bytes) {
+    if let Ok(entries) = msg::parse(bytes, ipsdoc::language::Language::English) {
         let _ = msg::find(&entries, "x");
     }
 }

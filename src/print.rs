@@ -21,7 +21,16 @@ macro_rules! eprintln {
 /// Writes `args` and a newline to `w`. A closed pipe drops it; any other failure (a full disk) ends the process with
 /// status 1, naming the program, since its output is incomplete.
 pub fn line(w: &mut impl Write, args: std::fmt::Arguments<'_>) {
-    if let Err(e) = writeln!(w, "{args}")
+    put(w, format_args!("{args}\n"));
+}
+
+/// Writes `args` to `w` with no newline, flushed: a progress line redrawn in place with `\r`. Failures as [`line`](fn@line).
+pub fn text(w: &mut impl Write, args: std::fmt::Arguments<'_>) {
+    put(w, args);
+}
+
+fn put(w: &mut impl Write, args: std::fmt::Arguments<'_>) {
+    if let Err(e) = w.write_fmt(args).and_then(|()| w.flush())
         && e.kind() != std::io::ErrorKind::BrokenPipe
     {
         let program = std::env::args_os()

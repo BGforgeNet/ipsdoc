@@ -9,10 +9,15 @@ never moves them; re-encoding at another rate or channel count does (`ipsdoc lip
 
 ## Writing (`ipsdoc lip`)
 
-- **With the line's text** (English): each word's sounds come from the CMU Pronouncing Dictionary, or letter-to-sound
+- **With the line's text**: in English each word's sounds come from the CMU Pronouncing Dictionary, or letter-to-sound
   rules for words it lacks. A forced alignment places them on the speech, against a model of how each sound sounds and
   how long it lasts, fitted to Fallout 2's own voiced lines.
 - **The text's source:** the dialog `.msg` names each line's sound: `ipsdoc lip --msg dialog/nhmyron.msg myn1003a.acm`.
+- **Other languages** (`--lang`; `ipsdoc lip --help` lists them): the languages of the Fallout 2 translations.
+  [eSpeak NG](https://github.com/espeak-ng/espeak-ng) gives their sounds, numbers and stress included, mapped onto the
+  English sounds by the shape of the mouth. Its data for a language is downloaded once into `ipsdoc` in the platform's
+  cache directory: `$XDG_CACHE_HOME` or `~/.cache` on Linux, `~/Library/Caches` on macOS, `%LOCALAPPDATA%` on Windows.
+  The message files are read in each language's code page.
 - **Without text**, the same model picks the likeliest run of sounds from the sound alone. It does so too, and says so,
   when the text has more sounds than its speech has room for.
 
@@ -60,10 +65,10 @@ A mouth shut (at rest, or lips closed) through more than half the loud speech is
 
 ### Against the words
 
-Given the lines' text (`check --msg dialog/` or `info --msg`: a dialog file or a directory of them, English), `check`
-also counts the closed-lips shapes against each line's m, b and p, a run of them (the m b of "remember") counted once:
-Interplay's files close the lips once for each. A lip file closing them under 0.67 or over 1.5 times as often, with
-under a quarter of the m, b and p met by a closure near where they fall, gets a warning. That warns on:
+Given the lines' text (`check --msg dialog/` or `info --msg`: a dialog file or a directory of them), `check` also counts
+the closed-lips shapes against each line's m, b and p, a run of them (the m b of "remember") counted once: Interplay's
+files close the lips once for each. A lip file closing them under 0.67 or over 1.5 times as often, with under a quarter
+of the m, b and p met by a closure near where they fall, gets a warning. That warns on:
 
 | Lip files                                                      | Warned |
 | -------------------------------------------------------------- | ------ |

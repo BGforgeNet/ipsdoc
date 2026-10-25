@@ -11,7 +11,8 @@
 //! writes audio as ACM, WAVC, RIFF WAV or Ogg Vorbis; [`repair`] corrects headers in place from what reading
 //! established, and lip files' length fields from their last marker.
 //!
-//! Lip sync: [`msg`] finds a voiced line's text, [`g2p`] turns it into phonemes, [`speech`] analyses the sound,
+//! Lip sync: [`msg`] finds a voiced line's text in its [`language`], [`g2p`] turns it into phonemes (other languages
+//! than English by eSpeak, its data downloaded by [`fetch`]), [`speech`] analyses the sound,
 //! [`lipalign`] places the phonemes on it (or picks the likeliest from the sound alone), and [`lipgen`] shapes them
 //! into a [`lip::Lip`], the file format [`lip`] reads, writes and checks; [`lipqual`] judges how well one follows its
 //! sound.
@@ -21,8 +22,10 @@
 pub mod acm;
 pub mod analysis;
 pub mod detect;
+pub mod fetch;
 pub mod g2p;
 pub mod input;
+pub mod language;
 pub mod lip;
 pub mod lipalign;
 pub mod lipgen;

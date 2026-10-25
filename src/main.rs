@@ -5,12 +5,15 @@ use std::io::{Read, Write};
 use std::num::{NonZeroU16, NonZeroU32};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::LazyLock;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use ipsdoc::acm::Overflow;
 use ipsdoc::detect::{self, Format, detect};
+use ipsdoc::fetch::Progress;
 use ipsdoc::input::{self, Note, Raw, RawBits, ReadOptions};
+use ipsdoc::language::Language;
 use ipsdoc::lip::{self, Lip};
 use ipsdoc::output::{self, OutputFormat, WriteOptions};
 use ipsdoc::pcm::Audio;
@@ -42,9 +45,12 @@ enum Command {
         #[arg(required = true)]
         files: Vec<PathBuf>,
         /// Dialog message files, or directories of them, giving each line's text: each lip file's closed lips are
-        /// then also shown against its line's words (English).
+        /// then also shown against its line's words.
         #[arg(long)]
         msg: Vec<PathBuf>,
+        /// The dialog's language; English by default.
+        #[arg(long, value_enum, requires = "msg")]
+        lang: Option<Lang>,
     },
     /// Decodes sounds and checks lip files (directories: every ACM, WAVC, RIFF, Ogg and lip file inside,
     /// recursively); fails on any that does not decode or check.
@@ -53,9 +59,12 @@ enum Command {
         #[arg(required = true)]
         paths: Vec<PathBuf>,
         /// Dialog message files, or directories of them, giving each line's text: each lip file is then also judged
-        /// against its line's words (English).
+        /// against its line's words.
         #[arg(long)]
         msg: Vec<PathBuf>,
+        /// The dialog's language; English by default.
+        #[arg(long, value_enum, requires = "msg")]
+        lang: Option<Lang>,
     },
     /// Writes Fallout lip-sync files for speech: from each sound and its line's text (from a dialog MSG, or a
     /// transcript beside the sound), or from the sound alone; or rescales a lip file to another sound.
@@ -97,6 +106,21 @@ enum RawBitsArg {
     /// Signed 16-bit little-endian.
     #[value(name = "16")]
     S16,
+}
+
+/// A dialog language on the command line: its code, or its directory name as an alias (`de`, `german`).
+#[derive(Debug, Clone, Copy)]
+struct Lang(Language);
+
+impl ValueEnum for Lang {
+    fn value_variants<'a>() -> &'a [Self] {
+        static ALL: LazyLock<Vec<Lang>> = LazyLock::new(|| Language::all().map(Lang).collect());
+        &ALL
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        Some(clap::builder::PossibleValue::new(self.0.code()).alias(self.0.directory()))
+    }
 }
 
 /// A Vorbis quality on oggenc's scale, refused at parse time rather than after the input is read.
@@ -165,6 +189,10 @@ struct LipArgs {
     /// Where to write, for a single sound.
     #[arg(short, long, conflicts_with = "rescale")]
     output: Option<PathBuf>,
+    /// The line's language: English is built in, the others are eSpeak NG's, their data downloaded once per language
+    /// into the cache directory. English by default.
+    #[arg(long, value_enum, conflicts_with = "rescale")]
+    lang: Option<Lang>,
     /// A lip file to rescale in place, to fit the sound given with `--for`.
     #[arg(long, requires = "for_sound", conflicts_with = "sounds")]
     rescale: Option<PathBuf>,
@@ -369,10 +397,10 @@ fn field_name(f: Field) -> &'static str {
     }
 }
 
-fn info(path: &Path, entries: Option<&[msg::Entry]>) -> Result<(), Failure> {
+fn info(path: &Path, dialog: Option<&Dialog>) -> Result<(), Failure> {
     let bytes = read_file(path)?;
     if lip::looks_like(&bytes) {
-        return lip_info(path, &bytes, entries);
+        return lip_info(path, &bytes, dialog);
     }
     let format = detect(&bytes);
     println!("{}: {}", path.display(), format.name());
@@ -471,8 +499,87 @@ fn read_head(path: &Path) -> std::io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// The entries of the message files `paths` names, a directory standing for the `.msg` files in it.
-fn load_msgs(paths: &[PathBuf]) -> Result<Vec<msg::Entry>, Failure> {
+/// Dialog lines, with their language's pronunciation.
+struct Dialog {
+    entries: Vec<msg::Entry>,
+    pronouncer: g2p::Pronouncer,
+}
+
+impl Dialog {
+    /// The lines of the message files `paths` names (see [`load_msgs`]) in the language [`dialog_language`] picks;
+    /// `None` without paths.
+    fn load(paths: &[PathBuf], lang: Option<Lang>) -> Result<Option<Dialog>, Failure> {
+        if paths.is_empty() {
+            return Ok(None);
+        }
+        let language = dialog_language(lang);
+        Ok(Some(Dialog {
+            entries: load_msgs(paths, language)?,
+            pronouncer: pronouncer(language)?,
+        }))
+    }
+
+    /// The tokens of the line for `sound`, if there is one.
+    fn tokens(&self, sound: &str) -> Result<Option<Vec<g2p::Token>>, Failure> {
+        let Some(found) = msg::find(&self.entries, sound) else {
+            return Ok(None);
+        };
+        self.pronouncer
+            .tokens(&found.entry.text)
+            .map(Some)
+            .map_err(|e| fail(1, format!("line {} ({sound}): {}", found.entry.number, chain(&e))))
+    }
+}
+
+/// The language `--lang` names, else English.
+fn dialog_language(lang: Option<Lang>) -> Language {
+    lang.map_or(Language::English, |Lang(l)| l)
+}
+
+/// `language`'s pronunciation: English built in, the others eSpeak's, its data fetched into the cache first.
+fn pronouncer(language: Language) -> Result<g2p::Pronouncer, Failure> {
+    if language == Language::English {
+        return Ok(g2p::Pronouncer::English);
+    }
+    let cache = ipsdoc::fetch::cache_dir().map_err(|e| fail(1, chain(&e)))?;
+    let dir = g2p::espeak::data(language, &cache, &mut show_progress()).map_err(|e| fail(1, chain(&e)))?;
+    let espeak = g2p::espeak::Espeak::new(language, &dir).map_err(|e| fail(1, chain(&e)))?;
+    Ok(g2p::Pronouncer::Espeak(Box::new(espeak)))
+}
+
+/// Download progress on stderr: where from, then on a terminal a count redrawn in place, then where it went.
+fn show_progress() -> impl FnMut(Progress<'_>) {
+    let terminal = std::io::IsTerminal::is_terminal(&std::io::stderr());
+    let mut shown = None;
+    move |p| match p {
+        Progress::Started { url, size } => {
+            shown = None;
+            eprintln!("downloading {url} ({} KB)", size.div_ceil(1024));
+        }
+        Progress::Read { done, size } if terminal => {
+            // Redrawn per percent, not per read: a fast link reads thousands of times.
+            let percent = done.saturating_mul(100) / size.max(1);
+            if shown != Some(percent) {
+                shown = Some(percent);
+                ipsdoc::print::text(
+                    &mut std::io::stderr(),
+                    format_args!("\r  {} / {} KB ({percent}%)", done / 1024, size.div_ceil(1024)),
+                );
+            }
+        }
+        Progress::Read { .. } => {}
+        Progress::Saved { path } => {
+            if terminal {
+                eprintln!("");
+            }
+            eprintln!("  saved {}", path.display());
+        }
+    }
+}
+
+/// The entries of the message files `paths` names, a directory standing for the `.msg` files in it, read in
+/// `language`'s code page.
+fn load_msgs(paths: &[PathBuf], language: Language) -> Result<Vec<msg::Entry>, Failure> {
     let mut entries = Vec::new();
     for p in paths {
         let files = if p.is_dir() {
@@ -486,15 +593,15 @@ fn load_msgs(paths: &[PathBuf]) -> Result<Vec<msg::Entry>, Failure> {
             vec![p.clone()]
         };
         for f in files {
-            entries.extend(msg::parse(&read_file(&f)?).map_err(|e| fail(1, format!("{}: {e}", f.display())))?);
+            entries
+                .extend(msg::parse(&read_file(&f)?, language).map_err(|e| fail(1, format!("{}: {e}", f.display())))?);
         }
     }
     Ok(entries)
 }
 
-fn check(paths: &[PathBuf], msgs: &[PathBuf]) -> Result<(), Failure> {
-    let entries = load_msgs(msgs)?;
-    let entries = (!msgs.is_empty()).then_some(entries.as_slice());
+fn check(paths: &[PathBuf], msgs: &[PathBuf], lang: Option<Lang>) -> Result<(), Failure> {
+    let dialog = Dialog::load(msgs, lang)?;
     let (mut checked, mut lips, mut failed) = (0u64, 0u64, 0u64);
     // Alignment per directory: a set of lip files is graded together, where chance evens out.
     let mut sets: BTreeMap<PathBuf, Vec<lipqual::Quality>> = BTreeMap::new();
@@ -529,7 +636,7 @@ fn check(paths: &[PathBuf], msgs: &[PathBuf]) -> Result<(), Failure> {
             }
             lips += 1;
             let (ok, quality) = match std::fs::read(&f) {
-                Ok(bytes) => check_lip(&f, &bytes, entries, &mut decoded),
+                Ok(bytes) => check_lip(&f, &bytes, dialog.as_ref(), &mut decoded),
                 Err(e) => {
                     eprintln!("{}: {e}", f.display());
                     (false, None)
@@ -675,12 +782,11 @@ fn repair_files(
 }
 
 /// `info` for each file; a file that fails is reported and the rest still shown.
-fn info_files(files: &[PathBuf], msgs: &[PathBuf]) -> Result<(), Failure> {
-    let entries = load_msgs(msgs)?;
-    let entries = (!msgs.is_empty()).then_some(entries.as_slice());
+fn info_files(files: &[PathBuf], msgs: &[PathBuf], lang: Option<Lang>) -> Result<(), Failure> {
+    let dialog = Dialog::load(msgs, lang)?;
     let mut failed = 0;
     for f in files {
-        if let Err(Failure(_, message)) = info(f, entries) {
+        if let Err(Failure(_, message)) = info(f, dialog.as_ref()) {
             eprintln!("{message}");
             failed += 1;
         }
@@ -716,7 +822,7 @@ fn label(s: lip::Severity) -> &'static str {
     }
 }
 
-fn lip_info(path: &Path, bytes: &[u8], entries: Option<&[msg::Entry]>) -> Result<(), Failure> {
+fn lip_info(path: &Path, bytes: &[u8], dialog: Option<&Dialog>) -> Result<(), Failure> {
     println!("{}: lip", path.display());
     let l = Lip::parse(bytes).map_err(|e| fail(1, format!("{}: {e}", path.display())))?;
     println!(
@@ -740,7 +846,9 @@ fn lip_info(path: &Path, bytes: &[u8], entries: Option<&[msg::Entry]>) -> Result
             };
             println!("  sound {}: {secs:.3} s; the lip file {fits}", acm.display());
             if fit.for_this_sound() {
-                let q = lipqual::quality(&l, &audio, line_tokens(entries, &l).as_deref());
+                let tokens =
+                    line_tokens(dialog, &l).map_err(|Failure(c, m)| Failure(c, format!("{}: {m}", path.display())))?;
+                let q = lipqual::quality(&l, &audio, tokens.as_deref());
                 print_quality(&q);
                 problems.extend(q.problems().iter().map(|p| (label(p.severity()), p.to_string())));
             } else {
@@ -812,20 +920,21 @@ fn print_quality(q: &lipqual::Quality) {
     }
 }
 
-/// The words of the line a lip file names, from the dialog `entries`.
-fn line_tokens(entries: Option<&[msg::Entry]>, l: &Lip) -> Option<Vec<g2p::Token>> {
-    entries
-        .and_then(|e| msg::find(e, l.name().trim()))
-        .map(|f| g2p::tokens(&f.entry.text))
+/// The words of the line a lip file names, from the `dialog`.
+fn line_tokens(dialog: Option<&Dialog>, l: &Lip) -> Result<Option<Vec<g2p::Token>>, Failure> {
+    match dialog {
+        Some(d) => d.tokens(l.name().trim()),
+        None => Ok(None),
+    }
 }
 
 /// Checks a lip file on its own and against the sound beside it; reports and returns whether it passes, and how well
-/// it follows the sound when that was judged. With `entries`, the line's text is looked up by the sound the lip file
+/// it follows the sound when that was judged. With a `dialog`, the line's text is looked up by the sound the lip file
 /// names. A sound that decodes goes into `decoded`.
 fn check_lip(
     path: &Path,
     bytes: &[u8],
-    entries: Option<&[msg::Entry]>,
+    dialog: Option<&Dialog>,
     decoded: &mut HashSet<PathBuf>,
 ) -> (bool, Option<lipqual::Quality>) {
     let l = match Lip::parse(bytes) {
@@ -884,7 +993,13 @@ fn check_lip(
             }
         }
         if fit.for_this_sound() {
-            let q = lipqual::quality(&l, &audio, line_tokens(entries, &l).as_deref());
+            // A line that cannot be read fails the file; its sync is still judged, without the words.
+            let tokens = line_tokens(dialog, &l).unwrap_or_else(|Failure(_, m)| {
+                eprintln!("{}: {m}", path.display());
+                ok = false;
+                None
+            });
+            let q = lipqual::quality(&l, &audio, tokens.as_deref());
             for p in q.problems() {
                 eprintln!("{}: {}: {p}", path.display(), label(p.severity()));
                 ok &= p.severity() != lip::Severity::Error;
@@ -912,13 +1027,15 @@ fn lip_files(a: &LipArgs) -> Result<(), Failure> {
         };
         refuse_overwriting(sound, o)?;
     }
+    let language = dialog_language(a.lang);
     let entries = match &a.msg {
-        Some(m) => Some(msg::parse(&read_file(m)?).map_err(|e| fail(1, format!("{}: {e}", m.display())))?),
+        Some(m) => Some(msg::parse(&read_file(m)?, language).map_err(|e| fail(1, format!("{}: {e}", m.display())))?),
         None => None,
     };
+    let pronouncer = pronouncer(language)?;
     let mut failed = 0;
     for sound in &a.sounds {
-        if let Err(Failure(_, message)) = lip_one(sound, a, entries.as_deref()) {
+        if let Err(Failure(_, message)) = lip_one(sound, a, entries.as_deref(), language, &pronouncer) {
             eprintln!("{message}");
             failed += 1;
         }
@@ -930,7 +1047,13 @@ fn lip_files(a: &LipArgs) -> Result<(), Failure> {
     }
 }
 
-fn lip_one(sound: &Path, a: &LipArgs, entries: Option<&[msg::Entry]>) -> Result<(), Failure> {
+fn lip_one(
+    sound: &Path,
+    a: &LipArgs,
+    entries: Option<&[msg::Entry]>,
+    language: Language,
+    pronouncer: &g2p::Pronouncer,
+) -> Result<(), Failure> {
     let name = base_name(sound);
     let text = match (entries, &a.msg) {
         (Some(entries), Some(m)) => {
@@ -954,7 +1077,7 @@ fn lip_one(sound: &Path, a: &LipArgs, entries: Option<&[msg::Entry]>) -> Result<
                 Err(e) => return Err(fail(1, format!("{}: {e}", txt.display()))),
             }
             .filter(|b| !b.iter().all(u8::is_ascii_whitespace))
-            .map(|b| msg::decode(&b))
+            .map(|b| msg::decode(&b, language))
         }
     };
     let bytes = read_file(sound)?;
@@ -968,7 +1091,12 @@ fn lip_one(sound: &Path, a: &LipArgs, entries: Option<&[msg::Entry]>) -> Result<
             audio.rate
         );
     }
-    let tokens = text.as_deref().map(g2p::tokens).filter(|t| !t.is_empty());
+    let tokens = text
+        .as_deref()
+        .map(|t| pronouncer.tokens(t))
+        .transpose()
+        .map_err(|e| fail(1, format!("{}: {}", sound.display(), chain(&e))))?
+        .filter(|t| !t.is_empty());
     if tokens.is_none() {
         eprintln!("{}: no text for it; lip sync from the audio only", sound.display());
     }
@@ -1012,8 +1140,8 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match (&cli.command, &cli.convert) {
         (Some(Command::Convert(a)), _) | (None, Some(a)) => convert(a),
-        (Some(Command::Info { files, msg }), _) => info_files(files, msg),
-        (Some(Command::Check { paths, msg }), _) => check(paths, msg),
+        (Some(Command::Info { files, msg, lang }), _) => info_files(files, msg, *lang),
+        (Some(Command::Check { paths, msg, lang }), _) => check(paths, msg, *lang),
         (
             Some(Command::Repair {
                 dry_run,
