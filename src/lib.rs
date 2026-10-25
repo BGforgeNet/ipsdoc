@@ -10,9 +10,10 @@
 //! WAVC through [`acm`] and [`wavc`] with [`analysis`] weighing their headers against the content; [`output`]
 //! writes audio in any container; [`repair`] corrects headers in place from what reading established.
 //!
-//! Lip sync: [`msg`] finds a voiced line's text, [`g2p`] turns it into phonemes, [`speech`] finds where the sound
-//! speaks, and [`lipgen`] aligns the two (or works from the sound alone) into a [`lip::Lip`], the file format [`lip`]
-//! reads, writes and checks; [`lipqual`] judges how well one follows its sound.
+//! Lip sync: [`msg`] finds a voiced line's text, [`g2p`] turns it into phonemes, [`speech`] analyses the sound,
+//! [`lipalign`] places the phonemes on it (or picks the likeliest from the sound alone), and [`lipgen`] shapes them
+//! into a [`lip::Lip`], the file format [`lip`] reads, writes and checks; [`lipqual`] judges how well one follows its
+//! sound.
 //!
 //! The binaries print through [`print`](mod@print), which survives a closed pipe.
 

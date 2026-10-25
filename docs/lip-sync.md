@@ -9,10 +9,12 @@
   sounds from the sound alone; so it does, and says so, when the text has more sounds than its speech has room for. The
   model judges each 10 ms by its loudness and its spectrum (mel-frequency cepstral coefficients).
 - **Checks.** A lip file names the sound the game loads for it, and should end with that sound; `check` reports a name
-  mismatch, phoneme codes the original game misreads (42 and up), and markers out of order. A lip file ending off its
-  sound by under 50 ms passes, as no player sees it; up to 150 ms is a warning; more, or a length 2 or 4 times off (made
-  for another rate or channel count), is an error. `check`, `info` and `repair` know a lip file by content: version 2
-  and the `VOC` extension field every original file has.
+  mismatch, phoneme codes the original game misreads (42 and up), markers out of order, and a marker count other than
+  one more than the phonemes; it warns of flags, a first marker other than (1, 0), five markers or fewer, and a length
+  field other than the last marker. A lip file ending off its sound by under 50 ms passes, as no player sees it; up to
+  150 ms is a warning; more, or a length 2 or 4 times off (made for another rate or channel count), is an error.
+  `check`, `info` and `repair` know a lip file by content: version 2 and the `VOC` extension field every original file
+  has.
 - **Quality.** `check` also judges how well each lip file follows its sound, from the two alone: a mouth shut (at rest,
   or lips closed) through more than half the loud speech is an error. Warnings: a mouth that follows the sound clearly
   better 60 to 300 ms late or 130 to 300 ms early (on lines of 2 s or more; a player sees a mouth late sooner than one
