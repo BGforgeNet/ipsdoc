@@ -57,7 +57,7 @@ ignore_without_reason = "warn"
 
 [package]
 name = "ipsdoc"
-version = "0.1.0"
+version = "0.2.0"
 description = "Reads, writes and repairs Interplay ACM, WAVC and other game sound files"
 edition.workspace = true
 rust-version.workspace = true
