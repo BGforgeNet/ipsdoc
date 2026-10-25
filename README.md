@@ -77,7 +77,8 @@ $ ipsdoc check music
   are.
 - `--quality Q`: Vorbis quality, -1 to 10, default 5.
 - `--raw` with `--raw-rate`, `--raw-channels`, `--raw-bits`: headerless PCM, instead of `--channels` and `--input-rate`.
-- `--wrap`: see `docs/quirks.md`.
+- `--wrap`: wrap ACM samples beyond 16 bits as the engines do, instead of clamping them (see
+  [the files' quirks](docs/quirks.md)).
 - `--full-depth`: a WAV keeps a depth beyond 16 bits; Infinity Engine games read WAV up to 16-bit.
 
 ```sh
@@ -146,18 +147,18 @@ myn1003a.lip: last marker 327380 -> 654760
 
 ### Formats
 
-What ipsdoc reads and writes, per format: `docs/formats.md`. What it does about the files' quirks: `docs/quirks.md`.
-
-How lip files are written and checked: `docs/lip-sync.md`.
+- [What ipsdoc reads and writes, per format](docs/formats.md)
+- [What it does about the files' quirks](docs/quirks.md)
+- [How lip files are written and checked](docs/lip-sync.md)
 
 ### Installing
 
 Download the archive for your system from the [releases page](https://github.com/BGforgeNet/ipsdoc/releases) and run the
 binary in it from anywhere.
 
-To build it instead: `docs/building.md`.
+Or [build it from source](docs/building.md).
 
 ### Licence
 
-GNU General Public License, version 3: `LICENSE`. Release archives include the notices of the software it contains
+[GNU General Public License, version 3](LICENSE). Release archives include the notices of the software it contains
 (`THIRD-PARTY-NOTICES.txt`).
