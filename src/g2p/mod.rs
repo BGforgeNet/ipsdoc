@@ -140,6 +140,8 @@ impl Phone {
 pub enum Token {
     /// A word's phonemes.
     Word(Vec<Phone>),
+    /// A word drawn out in the writing ("Riiiight", "Ahhh"), as said: its phonemes, collapsed.
+    Drawn(Vec<Phone>),
     /// A phrase break.
     Break,
     /// A vocal noise (a cough, a laugh).
@@ -198,17 +200,29 @@ pub fn tokens(text: &str) -> Vec<Token> {
     text::normalise(text)
         .into_iter()
         .map(|p| match p {
-            text::Piece::Word(w) => Token::Word(pronounce(&w)),
-            text::Piece::Capitals(w) => Token::Word(match dict::lookup(&w) {
-                Some(p) => p,
-                None if !w.bytes().any(|b| b"AEIOUY".contains(&b)) => spell(&w),
-                None => pronounce(&w),
-            }),
+            text::Piece::Word(w) => word(&w, pronounce(&w)),
+            text::Piece::Capitals(w) => word(
+                &w,
+                match dict::lookup(&w) {
+                    Some(p) => p,
+                    None if !w.bytes().any(|b| b"AEIOUY".contains(&b)) => spell(&w),
+                    None => pronounce(&w),
+                },
+            ),
             text::Piece::Break => Token::Break,
             text::Piece::Noise => Token::Noise,
         })
-        .filter(|t| !matches!(t, Token::Word(p) if p.is_empty()))
+        .filter(|t| !matches!(t, Token::Word(p) | Token::Drawn(p) if p.is_empty()))
         .collect()
+}
+
+/// `written`'s phonemes as a word, drawn out when it runs three or more of a letter.
+fn word(written: &str, phones: Vec<Phone>) -> Token {
+    if collapse(written, 2) == written {
+        Token::Word(phones)
+    } else {
+        Token::Drawn(phones)
+    }
 }
 
 /// Fallout names the dictionary lacks and the rules misread (from the unknown words of the Unofficial Patch's voiced
@@ -299,7 +313,7 @@ mod tests {
         tokens(text)
             .iter()
             .map(|t| match t {
-                Token::Word(p) => p.iter().map(|&p| code(p)).collect(),
+                Token::Word(p) | Token::Drawn(p) => p.iter().map(|&p| code(p)).collect(),
                 Token::Break => vec![255],
                 Token::Noise => vec![254],
             })
@@ -405,10 +419,17 @@ mod tests {
     }
 
     #[test]
-    fn drawn_out_spellings_are_collapsed() {
-        assert_eq!(tokens("REEEAL"), tokens("real"));
-        assert_eq!(tokens("Hmmmm"), tokens("hmm"));
-        assert_eq!(tokens("Ahhh"), tokens("ah"));
+    fn drawn_out_spellings_are_collapsed_and_marked() {
+        let drawn = |w: &str| match &tokens(w)[..] {
+            [Token::Word(p)] => Token::Drawn(p.clone()),
+            t => panic!("{t:?}"),
+        };
+        assert_eq!(tokens("REEEAL"), [drawn("real")]);
+        assert_eq!(tokens("Hmmmm"), [drawn("hmm")]);
+        assert_eq!(tokens("Riiiight"), [drawn("right")]);
+        // Two of a letter is spelling, not drawing out.
+        assert_eq!(tokens("Ahh"), tokens("ah"));
+        assert!(matches!(tokens("Ahh")[..], [Token::Word(_)]));
     }
 
     #[test]

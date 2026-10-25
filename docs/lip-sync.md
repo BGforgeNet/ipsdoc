@@ -30,4 +30,5 @@
   1.5 times as often, with under a quarter of the m, b and p met by a closure near where they fall, gets a warning. That
   warns on 3% of Fallout 2's own files, 1% of `ipsdoc lip --msg`'s, 26% of `ipsdoc lip`'s from the sound alone (which
   cannot know the words), and 41% of lip files made for another line. The directory grade adds the median closures per
-  m, b and p, with a warning outside 0.5 to 1.6 (Fallout 2's directories: 0.75 to 1.50).
+  m, b and p, with a warning outside 0.5 to 1.6 (Fallout 2's directories: 0.75 to 1.50). A line whose text draws a word
+  out ("Riiiight...", three or more of a letter) may hold a shape up to 1.5 s and change shape once a second.

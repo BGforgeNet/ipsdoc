@@ -746,6 +746,9 @@ fn print_quality(q: &lipqual::Quality) {
     if let Some(t) = q.text {
         println!("  words: {t}");
     }
+    if q.drawn_out {
+        println!("  words: the line draws a word out, so a longer hold and less movement pass");
+    }
 }
 
 /// The words of the line a lip file names, from the dialog `entries`.

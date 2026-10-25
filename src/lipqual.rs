@@ -39,12 +39,18 @@ const OPEN_QUIET_LIMIT: f64 = 0.5;
 /// Speech shorter than this (frames) has too few shapes for a rate.
 const MOVEMENT_MIN_FRAMES: usize = 100;
 /// Shape changes per second of speech outside these are a warning, a mouth that hardly moves or one that jitters:
-/// Interplay's files range 1.9 (a drawn-out "Riiiight...", the one warned about) to 14.7, wav2lip's 0.5 to 38.
+/// Interplay's files range 1.9 (a drawn-out "Riiiight...", warned about without its text) to 14.7, wav2lip's 0.5 to
+/// 38.
 const MOVEMENT: (f64, f64) = (2.0, 20.0);
 /// One shape held through more than this of unbroken speech (seconds) is a warning, a mouth frozen while the voice
-/// goes on: on 3.7% of Interplay's files (most of them drawn-out words, "Ahhh", "Hmmm"; their median 0.33), 11% of
-/// ours from the text, 26% from the sound alone, and 69% of wav2lip's.
+/// goes on. With their text: on 3.1% of Interplay's files (holds in plain speech, most under 1 s, and rests through a
+/// cough; their median 0.33), 10% of ours from the text, 25% from the sound alone, and 68% of wav2lip's.
 const HOLD_LIMIT: f64 = 0.65;
+/// A line whose text draws a word out ("Riiiight...", "Rrrrooow") may hold a shape this long ...
+const DRAWN_HOLD_LIMIT: f64 = 1.5;
+/// ... and change shape as seldom as this many times a second: Interplay's such lines hold up to 1.3 s and move as
+/// little as 1.9 times.
+const DRAWN_MOVEMENT: f64 = 1.0;
 /// Head frames 0 to 8 ranked by the median loudness rank of the speech frames showing them in Interplay's files
 /// (rest 0.14, then frame 4, closed lips 0.43, 2, 5, 3, 8, 1, and 7 at 0.71): how wide each opens, as voiced.
 const OPENNESS: [u8; 9] = [0, 7, 3, 5, 1, 4, 2, 8, 6];
@@ -166,6 +172,8 @@ pub struct Quality {
     pub longest_hold: Option<f64>,
     /// How the closed lips fit the line's text, when it was given.
     pub text: Option<TextFit>,
+    /// Whether the line's text, when given, draws a word out: a longer hold and less movement pass.
+    pub drawn_out: bool,
 }
 
 /// A way a lip file fails its sound.
@@ -233,7 +241,7 @@ impl fmt::Display for QualityProblem {
                 write!(f, "the mouth is open through {:.0}% of the quiet", 100.0 * share)
             }
             QualityProblem::Movement { rate } => {
-                let how = if *rate < MOVEMENT.0 { "hardly moves" } else { "jitters" };
+                let how = if *rate > MOVEMENT.1 { "jitters" } else { "hardly moves" };
                 write!(f, "the mouth {how}: {rate:.1} shape changes a second of speech")
             }
             QualityProblem::Held { seconds } => {
@@ -282,13 +290,17 @@ impl Quality {
         {
             out.push(QualityProblem::OpenWhileQuiet { share });
         }
+        let (floor, hold) = match self.drawn_out {
+            true => (DRAWN_MOVEMENT, DRAWN_HOLD_LIMIT),
+            false => (MOVEMENT.0, HOLD_LIMIT),
+        };
         if let Some(rate) = self.movement
-            && !(MOVEMENT.0..=MOVEMENT.1).contains(&rate)
+            && !(floor..=MOVEMENT.1).contains(&rate)
         {
             out.push(QualityProblem::Movement { rate });
         }
         if let Some(seconds) = self.longest_hold
-            && seconds > HOLD_LIMIT
+            && seconds > hold
         {
             out.push(QualityProblem::Held { seconds });
         }
@@ -471,6 +483,7 @@ pub fn quality(l: &Lip, audio: &Audio, text: Option<&[Token]>) -> Quality {
     let db: Vec<f32> = analysis.frames.iter().map(|f| f.db).collect();
     let n = db.len();
     let seconds = audio.frames() as f64 / f64::from(audio.rate);
+    let drawn_out = text.is_some_and(|t| t.iter().any(|x| matches!(x, Token::Drawn(_))));
     if analysis.segments.is_empty() || l.phonemes.iter().any(|&c| c >= PHONEME_COUNT) {
         return Quality {
             shut_while_loud: None,
@@ -483,6 +496,7 @@ pub fn quality(l: &Lip, audio: &Audio, text: Option<&[Token]>) -> Quality {
             movement: None,
             longest_hold: None,
             text: None,
+            drawn_out,
         };
     }
     let mut speaking = vec![false; n];
@@ -550,6 +564,7 @@ pub fn quality(l: &Lip, audio: &Audio, text: Option<&[Token]>) -> Quality {
             .then(|| changes as f64 * f64::from(speech::FRAMES_PER_SECOND) / speech_frames as f64),
         longest_hold: Some(longest as f64 / f64::from(speech::FRAMES_PER_SECOND)),
         text: text.map(|t| text_fit(&shown, &speaking, span, t)),
+        drawn_out,
     }
 }
 
@@ -688,7 +703,7 @@ fn text_fit(shown: &[u8], speaking: &[bool], span: (usize, usize), text: &[Token
     let phones: Vec<Option<bool>> = text
         .iter()
         .flat_map(|t| match t {
-            Token::Word(p) => p
+            Token::Word(p) | Token::Drawn(p) => p
                 .iter()
                 .map(|p| Some(matches!(p.sound, Arpabet::M | Arpabet::B | Arpabet::P)))
                 .collect(),
@@ -912,6 +927,7 @@ mod tests {
             movement: None,
             longest_hold: None,
             text: None,
+            drawn_out: false,
         };
         assert_eq!(q(Some(0.8)).problems(), [QualityProblem::Offset { ms: 200.0 }]);
         assert_eq!(q(Some(0.9)).problems(), []);
@@ -936,7 +952,7 @@ mod tests {
 
     #[test]
     fn movement_and_holds_are_judged_at_their_limits() {
-        let q = |movement, longest_hold| {
+        let judged = |movement, longest_hold, drawn_out| {
             Quality {
                 shut_while_loud: Some(0.0),
                 closed_while_loud: Some(0.0),
@@ -948,17 +964,38 @@ mod tests {
                 movement: Some(movement),
                 longest_hold: Some(longest_hold),
                 text: None,
+                drawn_out,
             }
             .problems()
         };
-        assert_eq!(q(MOVEMENT.0, HOLD_LIMIT), []);
+        assert_eq!(judged(MOVEMENT.0, HOLD_LIMIT, false), []);
         assert_eq!(
-            q(1.9, 0.66),
+            judged(1.9, 0.66, false),
             [
                 QualityProblem::Movement { rate: 1.9 },
                 QualityProblem::Held { seconds: 0.66 }
             ]
         );
+        // A drawn-out word in the text: Interplay's "Riiiight..." (1.9) and "Rrrrooow" (a 1.3 s hold) pass.
+        assert_eq!(judged(1.9, 1.3, true), []);
+        assert_eq!(judged(DRAWN_MOVEMENT, DRAWN_HOLD_LIMIT, true), []);
+        assert_eq!(
+            judged(0.9, 1.6, true),
+            [
+                QualityProblem::Movement { rate: 0.9 },
+                QualityProblem::Held { seconds: 1.6 }
+            ]
+        );
+    }
+
+    #[test]
+    fn a_drawn_out_word_in_the_text_is_noted() {
+        let audio = speech();
+        let l = whole(1, &audio);
+        let drawn = |text: &str| quality(&l, &audio, Some(&crate::g2p::tokens(text))).drawn_out;
+        assert!(drawn("Riiiight..."));
+        assert!(!drawn("Right..."));
+        assert!(!quality(&l, &audio, None).drawn_out);
     }
 
     #[test]
@@ -1092,6 +1129,7 @@ mod tests {
             movement: None,
             longest_hold: None,
             text: None,
+            drawn_out: false,
         };
         assert_eq!(grade(&vec![file(0.5, 0.9); SET_MIN - 1]), None);
         let good = grade(&vec![file(0.75, 0.1); SET_MIN]).unwrap();

@@ -112,7 +112,8 @@ fn phrases(tokens: &[Token]) -> Vec<Vec<Word>> {
     let mut out = vec![Vec::new()];
     for t in tokens {
         match t {
-            Token::Word(phones) => {
+            // A drawn-out word aligns as any other: its long vowel takes the time the sound gives it.
+            Token::Word(phones) | Token::Drawn(phones) => {
                 if let Some(last) = out.last_mut() {
                     last.push(Word(
                         phones

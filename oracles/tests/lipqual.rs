@@ -410,7 +410,7 @@ fn lipqual_limits_separate_good_lip_files_from_bad() {
     assert!(run.lines >= 900, "only {} lines judged", run.lines);
 
     // Bounds set on the run that chose the limits (Interplay: offsets 0.4%, closures 2.8%, open while quiet 2.1%, held
-    // 3.7%, movement 0.1%), then frozen.
+    // 3.1%), then frozen.
     let at_most = |set: &str, kinds: &[&str], bound: f64| {
         let r = run.rate(set, kinds);
         assert!(r <= bound, "{set}: {kinds:?} on {r}, over {bound}");
@@ -419,8 +419,7 @@ fn lipqual_limits_separate_good_lip_files_from_bad() {
         let r = run.rate(set, kinds);
         assert!(r >= bound, "{set}: {kinds:?} on {r}, under {bound}");
     };
-    at_most("interplay", &["shut"], 0.0);
-    at_most("interplay", &["movement"], 0.002);
+    at_most("interplay", &["shut", "movement"], 0.0);
     at_most("interplay", &["offset"], 0.01);
     at_most("interplay", &["closures"], 0.04);
     at_most("interplay", &["open quiet"], 0.03);
