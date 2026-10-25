@@ -5,24 +5,25 @@ as RIFF WAV and Ogg Vorbis files.
 
 Also writes and checks Fallout's lip-sync files.
 
+- [Commands](#commands)
+- [Examples](#examples)
+  - [Convert](#convert)
+  - [Infinity Engine](#infinity-engine)
+  - [Inspect and repair](#inspect-and-repair)
+  - [Check a directory](#check-a-directory)
+  - [Lip sync](#lip-sync)
+- [Formats](#formats)
+- [Installing](#installing)
+- [Licence](#licence)
+
 ### Commands
 
-- `ipsdoc IN [OUT]`, or `ipsdoc convert IN [OUT]`: converts. Without `OUT`: an ACM or WAVC becomes a `.wav`, anything
-  else an `.acm`, beside the input (a WAVC already named `.wav` needs an `OUT`). An ACM or WAVC converted to ACM or WAVC
-  keeps its stream, under a new header, unless its samples change. It names an output it replaces.
-- `ipsdoc info FILE... [--msg DIALOG]`: shows the headers, how the file reads, and which header fields are wrong; for a
-  lip file, how well it follows its sound (and its line's words, with `--msg`).
-- `ipsdoc check PATH... [--msg DIALOG]`: decodes each file named and, in directories (recursively), every ACM, WAVC,
-  RIFF and Ogg file, and checks the lip files among them. It fails if any does not decode, or a lip file is broken,
-  visibly out of time with the ACM beside it, or keeps the mouth shut while it speaks. It grades the lip sync of each
-  directory with 15 or more lip files it could judge.
-- `ipsdoc repair [--dry-run] FILE...`: fixes wrong ACM and WAVC header fields, and lip files' length fields, in place,
-  without re-encoding; sets an ACM's rate or channel count to one given (`--rate`, `--channels`).
-- `ipsdoc lip SOUND... [--msg FILE] [-o LIP]`: writes a Fallout lip-sync file beside each speech sound (or to `-o`, for
-  a single sound), from its line in the dialog `.msg` given (a sound it has no line for fails); without `--msg`, from a
-  `.txt` transcript beside it, else from the sound alone. It names each lip file it replaces.
-- `ipsdoc lip --rescale LIP --for SOUND`: rescales a lip file to another sound (another rate or channel count of the
-  same recording).
+- `ipsdoc convert IN [OUT]`, or `ipsdoc IN [OUT]`: converts between ACM, WAVC, WAV and Ogg Vorbis.
+- `ipsdoc info FILE...`: shows a file's headers, how it reads, and what in them is wrong.
+- `ipsdoc check PATH...`: decodes sounds and checks lip files, directories recursively.
+- `ipsdoc repair FILE...`: fixes wrong header fields in place, without re-encoding.
+- `ipsdoc lip SOUND...`: writes Fallout lip-sync files, from each line's text or from the sound alone.
+- `ipsdoc lip --rescale LIP --for SOUND`: fits a lip file to another rate or channel count of its sound.
 
 `convert` options: `--to acm|wavc|wav|ogg` (otherwise from the output's extension), `--rate R` (resample),
 `--channels N` and `--input-rate R` (read the input as having these, whatever its header says; the samples stay as they
@@ -31,19 +32,17 @@ PCM, instead of `--channels` and `--input-rate`), `--wrap` (see `docs/quirks.md`
 beyond 16 bits; Infinity Engine games read WAV up to 16-bit).
 
 `repair` options: `--rate R` and `--channels N` (store these in each ACM and WAVC header named, over what the content
-says, as the samples cannot tell an ACM's rate; a lip file named with them fails), `--dry-run`. `ipsdoc --help` and
-`ipsdoc <command> --help` list everything.
+says, as the samples cannot tell an ACM's rate; a lip file named with them fails), `--dry-run`.
+
+`info` and `check` take `--msg DIALOG`, dialog `.msg` files or directories of them, to judge lip files against each
+line's words. `lip` takes `--msg FILE`, the dialog file holding each sound's line (without it, a `.txt` transcript
+beside the sound, else the sound alone), and `-o LIP` for a single sound. `ipsdoc --help` and `ipsdoc <command> --help`
+list everything.
 
 Exit status: 0 when everything succeeded, 1 when a file failed (did not read, decode, check or write), 2 for a request
 that cannot be carried out (bad options, an output that would overwrite the input).
 
 ### Examples
-
-- [Convert](#convert)
-- [Infinity Engine](#infinity-engine)
-- [Inspect and repair](#inspect-and-repair)
-- [Check a directory](#check-a-directory)
-- [Lip sync](#lip-sync)
 
 #### Convert
 
