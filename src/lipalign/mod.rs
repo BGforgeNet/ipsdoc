@@ -295,9 +295,12 @@ pub fn recognise(a: &Analysis, span: std::ops::Range<usize>) -> Vec<Placed> {
                 let extra = if closed.contains(&c) { CLOSED_COST } else { 0.0 };
                 (MIN_SOUND, longest(c), STRETCH_COST + extra)
             };
+            let Some(last) = j.checked_sub(shortest) else {
+                continue;
+            };
             let (enter, fit, lengths) = (&enter[c], &fit[c], &lengths[c]);
             let (mut cheapest, mut start) = (f64::INFINITY, None);
-            for i in j.saturating_sub(longest)..=j.saturating_sub(shortest) {
+            for i in j.saturating_sub(longest)..=last {
                 let v = enter[i].0 + (fit[j] - fit[i]) + lengths[j - i] + extra;
                 if v < cheapest {
                     (cheapest, start) = (v, Some(i));
@@ -536,6 +539,20 @@ mod tests {
         // Over part of the line, only that part.
         let part = recognise(&a, 50..a.frames.len());
         assert!(part.first().is_some_and(|p| p.start == 50), "{part:?}");
+    }
+
+    #[test]
+    fn without_text_no_sound_is_shorter_than_the_shortest() {
+        // Short spans over the vowel, where a sound under the shortest would fit only from the span's first frame.
+        let a = analysis(&[(Silent, 30), (Vowel, 25), (Silent, 30)]);
+        for len in 1..=2 * MIN_SOUND {
+            let got = recognise(&a, 40..40 + len);
+            assert!(
+                got.iter()
+                    .all(|p| p.len >= MIN_SOUND || !matches!(p.what, What::Sound(_))),
+                "{len} frames: {got:?}"
+            );
+        }
     }
 
     #[test]
