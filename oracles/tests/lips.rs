@@ -237,7 +237,7 @@ fn lip_sync_beats_wav2lip() {
     assert!(h.lines >= 100, "only {} held-out lines scored", h.lines);
 
     // Interplay's movement is the reference: our text-made files, from the words by other means, change shape at
-    // nearly the same rate (6.6 to 6.8 a second against 7.0), between speech's syllable and phoneme rates.
+    // nearly the same rate (7.7 to 7.9 a second against 6.8 to 7.0), between speech's syllable and phoneme rates.
     let (ref_changes, ref_hold) = (h.original.changes_per_second(), h.original.median_hold_ms());
     let w2l_changes = (h.wav2lip.changes_per_second() - ref_changes).abs();
     let w2l_hold = (h.wav2lip.median_hold_ms() - ref_hold).abs();

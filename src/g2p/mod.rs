@@ -70,7 +70,7 @@ impl Arpabet {
     }
 }
 
-const SYMBOLS: [(&str, Arpabet); 39] = [
+pub(crate) const SYMBOLS: [(&str, Arpabet); 39] = [
     ("AA", Arpabet::Aa),
     ("AE", Arpabet::Ae),
     ("AH", Arpabet::Ah),

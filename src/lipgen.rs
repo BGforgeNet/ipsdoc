@@ -1,25 +1,22 @@
 //! Lip-sync generation: a sound, and optionally its line's phonemes, to a lip file.
 //!
-//! With text, the line's phrases are matched to the stretches of speech found in the sound, and each phrase's
-//! phonemes are aligned to its speech by loudness (vowels on the loud frames, consonants on the dips), each kept near
-//! its typical length. Without text, shapes come from the sound alone. Either way, neighbours showing the same head
-//! frame merge, shapes are held a minimum time, changes are capped per second, and pauses show the silent mouth.
+//! With text, the line's sounds are placed on its speech by a forced alignment ([`crate::lipalign`]). Without text,
+//! shapes come from the sound alone. Either way, neighbours showing the same head frame merge, shapes are held a
+//! minimum time, changes are capped per second, and pauses show the silent mouth.
 
-use crate::g2p::{self, Token};
+use crate::g2p::Token;
 use crate::lip::{self, CLOSED, HEAD_FRAME, Lip, Marker};
+use crate::lipalign;
 use crate::pcm::Audio;
 use crate::speech::{self, SpeechParams};
-
-/// Phoneme codes, one entry each in the per-code tables.
-const CODES: usize = lip::PHONEME_COUNT as usize;
 
 /// Tuning (times in seconds).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Params {
     /// Speech detection.
     pub speech: SpeechParams,
-    /// In aligning text to the sound, how much a phoneme's length straying from its typical share costs against its
-    /// loudness misfit.
+    /// In placing the text's sounds, how much a sound's length straying from its typical length costs against its
+    /// frames' fit.
     pub duration_weight: f32,
     /// The shortest a shape is held ...
     pub hold: f32,
@@ -27,7 +24,7 @@ pub struct Params {
     pub closed_hold: f32,
     /// At most this many shape changes per second.
     pub max_rate: f32,
-    /// Pauses inside a phrase longer than this show the silent mouth.
+    /// With text, pauses inside the line longer than this show the silent mouth.
     pub silence: f32,
     /// Shapes start this much before their sound, as the original lip files' do.
     pub lead: f32,
@@ -41,13 +38,19 @@ impl Default for Params {
     fn default() -> Params {
         Params {
             speech: SpeechParams::default(),
-            duration_weight: 3.0,
+            // Against forced alignments of Fallout 2's lines (tuning half of the speakers), 4 placed the m, b and p
+            // of 89.5% and 8 of 89.6%, with more of f and v (84.0% to 81.9%); 16 no better.
+            duration_weight: 8.0,
             // Shorter than a 40 ms shape is a flicker; at 50 ms the sound-only shapes, with fewer closures, moved less
             // than Interplay's (5.7 changes a second to its 6.8, tuning half), at 40 ms 6.5.
             hold: 0.04,
             closed_hold: 0.04,
-            max_rate: 8.0,
-            silence: 0.25,
+            // A cap of 8 cut placed sounds: f and v from 88.0% to 84.0% (tuning half); the sound alone is the same at
+            // either.
+            max_rate: 12.0,
+            // A shorter pause keeps its shape: at 0.05 s the mouth shut more often in speech, at 0.2 s it missed more
+            // of the pauses.
+            silence: 0.1,
             lead: 0.03,
             // Interplay closes the lips at a sixth of the dips, more often at a hum than a hiss. Closing at every dip
             // gave 2.3 closures per run of m, b and p in the text; these give 1.0 (tuning half) and raise agreement
@@ -62,12 +65,15 @@ impl Default for Params {
 pub fn generate(name: &str, audio: &Audio, tokens: Option<&[Token]>, p: &Params) -> Lip {
     let a = speech::analyse(audio, &p.speech);
     let total = audio.frames() as f64 * f64::from(speech::FRAMES_PER_SECOND) / f64::from(audio.rate);
-    let phrases = tokens.map(phrases).unwrap_or_default();
+    let placed = tokens
+        .filter(|t| t.iter().any(|x| !matches!(x, Token::Break)))
+        .map(|t| lipalign::align(t, &a, f64::from(p.duration_weight)))
+        .filter(|v| !v.is_empty());
     let mut shapes = vec![Shape { start: 0.0, code: 0 }];
-    if phrases.is_empty() {
-        audio_shapes(&a, p, &mut shapes);
-    } else {
-        text_shapes(&a, &phrases, p, &mut shapes);
+    match placed {
+        Some(placed) => text_shapes(&placed, &a, p, &mut shapes),
+        // No text, or more sounds than the speech has frames for.
+        None => audio_shapes(&a, p, 0..a.frames.len(), &mut shapes),
     }
     let mut shapes = clean(shapes, total, &a, p);
     let lead = f64::from(p.lead) * f64::from(speech::FRAMES_PER_SECOND);
@@ -94,292 +100,46 @@ impl Shape {
     }
 }
 
-/// The shape for a vocal noise: an open mouth (A as in father).
-const NOISE_CODE: u8 = 6;
-
-/// A placeable unit: phonemes with their relative lengths.
-#[derive(Debug, Clone)]
-struct Word(Vec<(u8, f64)>);
-
-impl Word {
-    fn weight(&self) -> f64 {
-        self.0.iter().map(|&(_, w)| w).sum()
-    }
-}
-
-/// The line split at its breaks, empty phrases dropped.
-fn phrases(tokens: &[Token]) -> Vec<Vec<Word>> {
-    let mut out = vec![Vec::new()];
-    for t in tokens {
-        match t {
-            // A drawn-out word aligns as any other: its long vowel takes the time the sound gives it.
-            Token::Word(phones) | Token::Drawn(phones) => {
-                if let Some(last) = out.last_mut() {
-                    last.push(Word(
-                        phones
-                            .iter()
-                            .map(|&ph| {
-                                let c = g2p::code(ph);
-                                (c, f64::from(CODE_MS[usize::from(c)]))
-                            })
-                            .collect(),
-                    ));
-                }
-            }
-            Token::Noise => {
-                if let Some(last) = out.last_mut() {
-                    last.push(Word(vec![(NOISE_CODE, NOISE_MS)]));
-                }
-            }
-            Token::Break => out.push(Vec::new()),
-        }
-    }
-    out.retain(|p| !p.is_empty());
-    out
-}
-
-/// Each code's typical length (ms): the median length of its shapes in Fallout 2's 1029 original lip files (shapes
-/// over 500 ms, held through a pause, left out). Nearly even: the original tool spaced shapes between anchors.
-const CODE_MS: [u16; CODES] = [
-    100, 112, 105, 124, 115, 113, 116, 111, 141, 143, 106, 111, 111, 96, 136, 138, 158, 102, 99, 91, 93, 99, 95, 108,
-    106, 113, 97, 111, 104, 117, 103, 95, 105, 97, 98, 101, 104, 88, 91, 110, 103, 123,
-];
 /// Without text, a dip this deep (dB) under both sides within 50 ms is taken as a syllable boundary.
 const SYLLABLE_DIP: f32 = 2.0;
-/// A vocal noise (a cough, a laugh) takes about two shapes' time.
-const NOISE_MS: f64 = 220.0;
 
-/// Splits `n` items into `groups` contiguous non-empty groups (`n >= groups >= 1`) so that each group's share of the
-/// items' total size is as close as can be to the share of its counterpart; returns each group's end.
-fn partition(sizes: &[f64], targets: &[f64]) -> Vec<usize> {
-    let (n, g) = (sizes.len(), targets.len());
-    let (total, target_total) = (
-        sizes.iter().sum::<f64>().max(1e-9),
-        targets.iter().sum::<f64>().max(1e-9),
-    );
-    let mut prefix = vec![0.0; n + 1];
-    for i in 0..n {
-        prefix[i + 1] = prefix[i] + sizes[i] / total;
-    }
-    // cost[k][j]: best for the first k groups covering the first j items.
-    let mut cost = vec![vec![f64::INFINITY; n + 1]; g + 1];
-    let mut from = vec![vec![0; n + 1]; g + 1];
-    cost[0][0] = 0.0;
-    for k in 1..=g {
-        let want = targets[k - 1] / target_total;
-        for j in k..=n - (g - k) {
-            for i in (k - 1)..j {
-                let c = cost[k - 1][i] + (prefix[j] - prefix[i] - want).powi(2);
-                if c < cost[k][j] {
-                    cost[k][j] = c;
-                    from[k][j] = i;
-                }
-            }
-        }
-    }
-    let mut ends = vec![n; g];
-    let mut j = n;
-    for k in (1..=g).rev() {
-        ends[k - 1] = j;
-        j = from[k][j];
-    }
-    ends
-}
-
-/// Stretches of speech shorter than this (frames) take no phrase of their own: a breath or a click took a whole
-/// phrase, its phones piled onto a few frames (5% of the phones of Fallout 2's lines had under 30 ms each).
-const MIN_UNIT: f64 = 15.0;
-
-/// The stretches of speech phrases are matched to: each stretch, a short one joined to its nearer neighbour.
-fn units(segs: &[(f64, f64)]) -> Vec<Vec<(f64, f64)>> {
-    let mut units: Vec<Vec<(f64, f64)>> = segs.iter().map(|&s| vec![s]).collect();
-    let length = |u: &[(f64, f64)]| u.iter().map(|&(s, e)| e - s).sum::<f64>();
-    while units.len() > 1 {
-        let Some(i) = (0..units.len())
-            .filter(|&i| length(&units[i]) < MIN_UNIT)
-            .min_by(|&x, &y| length(&units[x]).total_cmp(&length(&units[y])))
-        else {
-            break;
-        };
-        // The gap to each neighbour; the nearer one takes it.
-        let before = (i > 0).then(|| units[i][0].0 - units[i - 1].last().map_or(0.0, |s| s.1));
-        let after = units.get(i + 1).map(|n| n[0].0 - units[i].last().map_or(0.0, |s| s.1));
-        let into = match (before, after) {
-            (Some(b), Some(a)) if a < b => i + 1,
-            (_, None) | (Some(_), Some(_)) => i - 1,
-            (None, Some(_)) => i + 1,
-        };
-        let u = units.remove(i);
-        let into = if into > i { into - 1 } else { into };
-        if into < i {
-            units[into].extend(u);
-        } else {
-            let tail = std::mem::replace(&mut units[into], u);
-            units[into].extend(tail);
-        }
-    }
-    units
-}
-
-/// Phrases laid over speech: phrases matched to stretches of speech, phonemes aligned to each group's speech frames;
-/// silent mouth between matched groups and over long pauses inside one.
-fn text_shapes(a: &speech::Analysis, phrases: &[Vec<Word>], p: &Params, out: &mut Vec<Shape>) {
-    let segs: Vec<(f64, f64)> = a.segments.iter().map(|s| (s.start as f64, s.end as f64)).collect();
-    if segs.is_empty() {
-        return;
-    }
-    let segs = units(&segs);
-    let pw: Vec<f64> = phrases.iter().map(|ph| ph.iter().map(Word::weight).sum()).collect();
-    let sd: Vec<f64> = segs.iter().map(|u| u.iter().map(|&(s, e)| e - s).sum()).collect();
-    // Pairs of (phrase range, segment range).
-    let mut pairs = Vec::new();
-    if phrases.len() <= segs.len() {
-        let mut s0 = 0;
-        for (k, end) in partition(&sd, &pw).into_iter().enumerate() {
-            pairs.push((k..k + 1, s0..end));
-            s0 = end;
-        }
-    } else {
-        let mut p0 = 0;
-        for (k, end) in partition(&pw, &sd).into_iter().enumerate() {
-            pairs.push((p0..end, k..k + 1));
-            p0 = end;
-        }
-    }
+/// The placed sounds as shapes: each sound from its start; a pause inside the line shown as the silent mouth only when
+/// longer than `p.silence` (a shorter one keeps the shape before it), the edges' always; speech the text lacks shaped
+/// from the sound alone.
+fn text_shapes(placed: &[lipalign::Placed], a: &speech::Analysis, p: &Params, out: &mut Vec<Shape>) {
     let silence = f64::from(p.silence) * f64::from(speech::FRAMES_PER_SECOND);
-    for (prange, srange) in pairs {
-        let group: Vec<(f64, f64)> = segs[srange].iter().flatten().copied().collect();
-        let phones: Vec<(u8, f64)> = phrases[prange]
-            .iter()
-            .flatten()
-            .flat_map(|w| w.0.iter().copied())
-            .collect();
-        // The group's speech frames, its pauses left out.
-        let frames: Vec<usize> = group.iter().flat_map(|&(s, e)| s as usize..e as usize).collect();
-        let placed: Vec<Shape> = phones
-            .iter()
-            .zip(align(&phones, &frames, a, p))
-            .map(|(code, f)| Shape {
-                start: frames[f] as f64,
-                code: code.0,
-            })
-            .collect();
-        out.extend_from_slice(&placed);
-        // Long pauses inside the group, and the group's end. After a pause the mouth resumes with this group's
-        // phoneme running at that point (never with a shape pushed for an earlier pause).
-        for pair in group.windows(2) {
-            let (gap_start, gap_end) = (pair[0].1, pair[1].0);
-            if gap_end - gap_start > silence {
-                let resume = placed.iter().rev().find(|s| s.start <= gap_end).map_or(0, |s| s.code);
-                out.push(Shape {
-                    start: gap_start,
-                    code: 0,
-                });
-                out.push(Shape {
-                    start: gap_end,
-                    code: resume,
-                });
-            }
-        }
-        if let Some(&(_, end)) = group.last() {
-            out.push(Shape { start: end, code: 0 });
-        }
-    }
-}
-
-/// How loud a phoneme is expected to be, 0 to 1: vowels (and noises) loudest, nasals and liquids between, stops and
-/// fricatives quietest.
-fn loudness_target(code: u8) -> f32 {
-    match code {
-        1..=16 => 1.0,
-        32..=38 => 0.6,
-        _ => 0.35,
-    }
-}
-
-/// Where each phoneme starts, as an index into `frames` (a phrase group's speech frames): the split of the frames into
-/// one run per phoneme that best fits each frame's loudness to its phoneme's, with each run's length kept near its
-/// phoneme's typical share. Falls back to the shares alone when there are more phonemes than frames.
-fn align(phones: &[(u8, f64)], frames: &[usize], a: &speech::Analysis, p: &Params) -> Vec<usize> {
-    let (n, m) = (phones.len(), frames.len());
-    let total_ms: f64 = phones.iter().map(|&(_, ms)| ms).sum::<f64>().max(1e-9);
-    let expected: Vec<f64> = phones.iter().map(|&(_, ms)| ms / total_ms * m as f64).collect();
-    if n == 0 || n > m {
-        let mut cum = 0.0;
-        return expected
-            .iter()
-            .map(|e| {
-                let at = cum;
-                cum += e;
-                (at.floor() as usize).min(m.saturating_sub(1))
-            })
-            .collect();
-    }
-    // Loudness 0 to 1 against the loudest frame within 150 ms.
-    const REACH: usize = 15;
-    let db: Vec<f32> = frames.iter().map(|&f| a.frames[f].db).collect();
-    let level: Vec<f32> = (0..m)
-        .map(|i| {
-            let peak = db[i.saturating_sub(REACH)..(i + REACH + 1).min(m)]
-                .iter()
-                .copied()
-                .fold(f32::MIN, f32::max);
-            ((db[i] - (peak - LOUDNESS_RANGE)) / LOUDNESS_RANGE).clamp(0.0, 1.0)
-        })
-        .collect();
-    // fit[i][j]: the summed loudness misfit of phoneme i over frames 0..j.
-    let fit: Vec<Vec<f64>> = phones
-        .iter()
-        .map(|&(code, _)| {
-            let t = loudness_target(code);
-            let mut sums = vec![0.0; m + 1];
-            for j in 0..m {
-                sums[j + 1] = sums[j] + f64::from((level[j] - t).powi(2));
-            }
-            sums
-        })
-        .collect();
-    let weight = f64::from(p.duration_weight);
-    // cost[i][j]: the best for phonemes 0..i over frames 0..j; from[i][j] where phoneme i-1 starts.
-    let mut cost = vec![vec![f64::INFINITY; m + 1]; n + 1];
-    let mut from = vec![vec![0usize; m + 1]; n + 1];
-    cost[0][0] = 0.0;
-    for i in 1..=n {
-        let e = expected[i - 1].max(1.0);
-        let longest = ((3.0 * e).ceil() as usize).max(3);
-        for j in i..=m - (n - i) {
-            for start in j.saturating_sub(longest).max(i - 1)..j {
-                let prev = cost[i - 1][start];
-                if !prev.is_finite() {
+    for x in placed {
+        let code = match x.what {
+            lipalign::What::Sound(code) => code,
+            lipalign::What::Pause => {
+                let inside = x.start > 0 && x.start + x.len < a.frames.len();
+                if inside && (x.len as f64) < silence {
                     continue;
                 }
-                let len = (j - start) as f64;
-                let c = prev + fit[i - 1][j] - fit[i - 1][start] + weight * ((len - e) / e).powi(2);
-                if c < cost[i][j] {
-                    cost[i][j] = c;
-                    from[i][j] = start;
-                }
+                0
             }
-        }
+            lipalign::What::Unscripted => {
+                audio_shapes(a, p, x.start..x.start + x.len, out);
+                continue;
+            }
+        };
+        out.push(Shape {
+            start: x.start as f64,
+            code,
+        });
     }
-    let mut starts = vec![0; n];
-    let mut j = m;
-    for i in (1..=n).rev() {
-        starts[i - 1] = from[i][j];
-        j = from[i][j];
-    }
-    starts
 }
 
-/// The span (dB) under the local peak that the alignment's loudness scale covers.
-const LOUDNESS_RANGE: f32 = 25.0;
-
-/// Shapes from the sound alone, frame by frame inside speech: closed lips at humming dips, a tongue consonant at the
-/// other dips, a hiss shape for noisy frames, and openness by loudness under the stretch's peak.
-fn audio_shapes(a: &speech::Analysis, p: &Params, out: &mut Vec<Shape>) {
+/// Shapes from the sound alone, frame by frame inside speech within `span`: closed lips at humming dips, a tongue
+/// consonant at the other dips, a hiss shape for noisy frames, and openness by loudness under the stretch's peak.
+fn audio_shapes(a: &speech::Analysis, p: &Params, span: std::ops::Range<usize>, out: &mut Vec<Shape>) {
     const REACH: usize = 15;
     let side = |r: std::ops::Range<usize>| a.frames[r].iter().map(|x| x.db).fold(f32::MIN, f32::max);
-    for s in &a.segments {
+    let segments = a.segments.iter().filter_map(|s| {
+        let (start, end) = (s.start.max(span.start), s.end.min(span.end));
+        (start < end).then_some(speech::Segment { start, end })
+    });
+    for s in segments {
         let mut codes: Vec<u8> = (s.start..s.end)
             .map(|f| {
                 let fr = a.frames[f];
@@ -704,17 +464,6 @@ mod tests {
         let kept = clean(shapes, 200.0, &a, &p);
         assert!(changes(&kept) <= 6, "{kept:?}");
         assert!(kept.iter().any(|s| s.frame() == CLOSED), "{kept:?}");
-    }
-
-    #[test]
-    fn a_breath_beside_a_phrase_takes_no_phrase_of_its_own() {
-        // A 50 ms stretch 100 ms after one phrase and 500 ms before the next joins the first.
-        let joined = units(&[(0.0, 100.0), (110.0, 115.0), (165.0, 300.0)]);
-        assert_eq!(joined, [vec![(0.0, 100.0), (110.0, 115.0)], vec![(165.0, 300.0)]]);
-        // Nearer the next one, it joins that; long stretches stay apart.
-        let joined = units(&[(0.0, 100.0), (150.0, 155.0), (160.0, 300.0)]);
-        assert_eq!(joined, [vec![(0.0, 100.0)], vec![(150.0, 155.0), (160.0, 300.0)]]);
-        assert_eq!(units(&[(0.0, 5.0)]), [vec![(0.0, 5.0)]]);
     }
 
     #[test]

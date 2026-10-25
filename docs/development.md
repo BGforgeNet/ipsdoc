@@ -86,3 +86,15 @@ shape held), and how each set's directories grade. The figures in `src/lipqual.r
 ```sh
 IPSDOC_LIPS=... IPSDOC_MSG=... IPSDOC_LIPS_WAV2LIP=... cargo test --release -p oracles --test lipqual -- --ignored --nocapture
 ```
+
+`src/lipmodel.rs`, the model `ipsdoc lip` places a line's sounds with, is fitted by `oracles/tests/lipmodel.rs` to
+forced alignments of the same lines, which fails and prints the table when the committed one differs. `IPSDOC_MFA` holds
+the alignments: one TextGrid per line, `<speaker>/<line>.TextGrid`, from the Montreal Forced Aligner 3.4 with its
+`english_us_arpa` acoustic model, dictionary and G2P model
+(`mfa align --g2p_model_path english_us_arpa <corpus> english_us_arpa english_us_arpa <out>`), over each line's sound as
+a WAV beside its text: the transcript beside the sound where there is one, else its dialog text, a vocal noise (a cough,
+a laugh) written `[noise]`.
+
+```sh
+IPSDOC_LIPS=... IPSDOC_MFA=... cargo test --release -p oracles --test lipmodel -- --ignored --nocapture
+```
