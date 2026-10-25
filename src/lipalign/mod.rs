@@ -269,12 +269,13 @@ pub fn recognise(a: &Analysis, span: std::ops::Range<usize>) -> Vec<Placed> {
         .collect();
     let closed = [g2p::Arpabet::B, g2p::Arpabet::M, g2p::Arpabet::P].map(|s| s as usize);
     // best[j][c]: the cheapest run over frames 0..j whose last stretch, of class c, ends at j; back[j][c]: where that
-    // stretch starts and the class before it. enter[i][c]: the cheapest run that a stretch of class c can start at i.
+    // stretch starts and the class before it. enter[c][i]: the cheapest run that a stretch of class c can start at i,
+    // and the class before it; indexed by class first, so the loop over a stretch's starts reads it contiguously.
     let mut best = vec![[f64::INFINITY; CLASSES]; n + 1];
     let mut back = vec![[(0, SILENCE); CLASSES]; n + 1];
-    let mut enter = vec![[(f64::INFINITY, SILENCE); CLASSES]; n + 1];
+    let mut enter = vec![vec![(f64::INFINITY, SILENCE); n + 1]; CLASSES];
     for &c in &classes {
-        enter[0][c] = (f64::from(NEXT[SILENCE][c]), SILENCE);
+        enter[c][0] = (f64::from(NEXT[SILENCE][c]), SILENCE);
     }
     for j in 1..=n {
         for &c in &classes {
@@ -284,17 +285,21 @@ pub fn recognise(a: &Analysis, span: std::ops::Range<usize>) -> Vec<Placed> {
                 let extra = if closed.contains(&c) { CLOSED_COST } else { 0.0 };
                 (MIN_SOUND, longest(c), STRETCH_COST + extra)
             };
+            let (enter, fit, lengths) = (&enter[c], &fit[c], &lengths[c]);
+            let (mut cheapest, mut start) = (f64::INFINITY, None);
             for i in j.saturating_sub(longest)..=j.saturating_sub(shortest) {
-                let (from, _) = enter[i][c];
-                let v = from + (fit[c][j] - fit[c][i]) + lengths[c][j - i] + extra;
-                if v < best[j][c] {
-                    best[j][c] = v;
-                    back[j][c] = (i, enter[i][c].1);
+                let v = enter[i].0 + (fit[j] - fit[i]) + lengths[j - i] + extra;
+                if v < cheapest {
+                    (cheapest, start) = (v, Some(i));
                 }
+            }
+            best[j][c] = cheapest;
+            if let Some(i) = start {
+                back[j][c] = (i, enter[i].1);
             }
         }
         for &c in &classes {
-            enter[j][c] = classes
+            enter[c][j] = classes
                 .iter()
                 .map(|&b| (best[j][b] + f64::from(NEXT[b][c]), b))
                 .min_by(|p, q| p.0.total_cmp(&q.0))
