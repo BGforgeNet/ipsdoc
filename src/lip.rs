@@ -257,6 +257,26 @@ pub fn fit(last: i32, sound: &Audio) -> Fit {
     }
 }
 
+/// `p`, an existing file, as its directory spells it: on a case-insensitive file system (Windows, macOS) `X.acm`
+/// finds `x.acm`, and the name reported should be the file's own. Unlisted (an unreadable directory), `p` as given.
+fn as_listed(p: PathBuf) -> PathBuf {
+    let (Some(dir), Some(name)) = (p.parent(), p.file_name()) else {
+        return p;
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return p;
+    };
+    let names: Vec<std::ffi::OsString> = entries.filter_map(|e| e.ok().map(|e| e.file_name())).collect();
+    if names.iter().any(|n| n == name) {
+        return p;
+    }
+    let listed = names
+        .into_iter()
+        .find(|n| n.eq_ignore_ascii_case(name))
+        .map(|n| dir.join(n));
+    listed.unwrap_or(p)
+}
+
 fn read_i32(bytes: &[u8], at: usize) -> i32 {
     let mut b = [0; 4];
     b.copy_from_slice(&bytes[at..at + 4]);
@@ -374,8 +394,8 @@ impl Lip {
     }
 
     /// The sound the game plays with this lip file, read from `path`: the ACM its name field names, beside it (the
-    /// name as stored or in lower case, `.acm` or `.ACM`). `None` when the name is empty or a path (`../x`, `/x`), or
-    /// no such file exists.
+    /// name as stored or in lower case, `.acm` or `.ACM`), spelled as its directory lists it. `None` when the name is
+    /// empty or a path (`../x`, `/x`), or no such file exists.
     pub fn sound_beside(&self, path: &Path) -> Option<PathBuf> {
         let name = self.name();
         if !matches!(
@@ -389,6 +409,7 @@ impl Lip {
             .iter()
             .flat_map(|n| ["acm", "ACM"].map(|ext| dir.join(format!("{n}.{ext}"))))
             .find(|p| p.is_file())
+            .map(as_listed)
     }
 
     /// The last marker's position: the sound's length in position units, by the markers.
@@ -475,6 +496,17 @@ mod tests {
 
     fn marker(kind: i32, position: i32) -> Marker {
         Marker { kind, position }
+    }
+
+    #[test]
+    fn a_found_sound_is_named_as_its_directory_lists_it() {
+        let dir = std::env::temp_dir().join(format!("ipsdoc-lip-listed-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("x.acm"), b"").unwrap();
+        // What a case-insensitive file system finds for the name field `X`: the file is `x.acm`.
+        let got = (as_listed(dir.join("X.acm")), as_listed(dir.join("x.acm")));
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(got, (dir.join("x.acm"), dir.join("x.acm")));
     }
 
     #[test]
