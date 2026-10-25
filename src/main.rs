@@ -255,6 +255,14 @@ fn convert(a: &ConvertArgs) -> Result<(), Failure> {
     if a.full_depth && format != OutputFormat::Riff {
         return Err(fail(2, "--full-depth is for WAV output only"));
     }
+    // An ACM header holds its rate in 16 bits, as `repair --rate` takes it: a rate asked for beyond that is a request
+    // that cannot be carried out, not a file that failed.
+    let asked = a.rate.or(a.input_rate).or(a.raw.then_some(a.raw_rate));
+    if matches!(format, OutputFormat::Acm | OutputFormat::Wavc)
+        && let Some(r) = asked.filter(|r| r.get() > u32::from(u16::MAX))
+    {
+        return Err(fail(2, format!("{r} Hz: an ACM header holds {} Hz at most", u16::MAX)));
+    }
     let opts = ReadOptions {
         overflow: if a.wrap { Overflow::Wrap } else { Overflow::Clamp },
         channels: a.channels,
@@ -271,7 +279,10 @@ fn convert(a: &ConvertArgs) -> Result<(), Failure> {
     let loaded = input::read(&bytes, &opts).map_err(|e| fail(1, format!("{}: {}", a.input.display(), chain(&e))))?;
     let mut overflowed = 0;
     for n in &loaded.notes {
-        eprintln!("{}: {}", a.input.display(), describe(n));
+        // A header the content agrees with needs no word in a conversion; `info` still shows the evidence.
+        if !matches!(n, Note::Channels { header, used, .. } if header == used) {
+            eprintln!("{}: {}", a.input.display(), describe(n));
+        }
         if let Note::Overflowed { samples } = n {
             overflowed += samples;
         }

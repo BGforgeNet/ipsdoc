@@ -384,6 +384,28 @@ fn a_copied_stream_states_the_channels_its_content_reads_as() {
 }
 
 #[test]
+fn convert_notes_the_channels_only_where_the_header_is_wrong() {
+    let d = Dir::new();
+    let (stereo_acm, speech) = (d.path("music.acm"), d.path("speech.acm"));
+    std::fs::write(&stereo_acm, foreign_acm(&stereo().to_i16(), 2, 22050)).unwrap();
+    let out = ipsdoc(&["convert", s(&stereo_acm), s(&d.path("music.wav"))]);
+    ok(&out);
+    assert!(!all_output(&out).contains("channels"), "{}", all_output(&out));
+    // Mono speech under a stereo header: the note stays.
+    let mono: Vec<i16> = (0..20000)
+        .map(|n| (3000.0 * (f64::from(n) * 0.031).sin()) as i16)
+        .collect();
+    std::fs::write(&speech, foreign_acm(&mono, 2, 22050)).unwrap();
+    let out = ipsdoc(&["convert", s(&speech), s(&d.path("speech.wav"))]);
+    ok(&out);
+    assert!(
+        all_output(&out).contains("channels: header 2, reads as 1"),
+        "{}",
+        all_output(&out)
+    );
+}
+
+#[test]
 fn an_overflowing_stream_is_re_encoded_clamped_or_copied_with_wrap() {
     let d = Dir::new();
     let (src, dst) = (d.path("loud.acm"), d.path("out.acm"));
@@ -590,6 +612,28 @@ fn repair_sets_a_given_rate_and_channel_count_and_nothing_else() {
     want[28 + 8..28 + 10].copy_from_slice(&1u16.to_le_bytes());
     want[28 + 10..28 + 12].copy_from_slice(&11025u16.to_le_bytes());
     same_bytes(&std::fs::read(&wavc).unwrap(), &want);
+}
+
+#[test]
+fn convert_refuses_a_rate_an_acm_header_cannot_hold_before_reading() {
+    let d = Dir::new();
+    let acm = d.path("a.acm");
+    std::fs::write(&acm, foreign_acm(&stereo().to_i16(), 2, 22050)).unwrap();
+    for (flag, to) in [("--input-rate", "acm"), ("--rate", "acm"), ("--input-rate", "wavc")] {
+        let out_path = d.path("out.x");
+        let out = ipsdoc(&["convert", flag, "96000", "--to", to, s(&acm), s(&out_path)]);
+        assert_eq!(out.status.code(), Some(2), "{flag} {to}: {}", all_output(&out));
+        assert!(all_output(&out).contains("96000 Hz"), "{}", all_output(&out));
+        assert!(!out_path.exists());
+    }
+    // WAV holds such a rate.
+    ok(&ipsdoc(&[
+        "convert",
+        "--input-rate",
+        "96000",
+        s(&acm),
+        s(&d.path("out.wav")),
+    ]));
 }
 
 #[test]
