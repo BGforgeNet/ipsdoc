@@ -1,8 +1,8 @@
 //! Lip-sync generation: a sound, and optionally its line's phonemes, to a lip file.
 //!
 //! With text, the line's sounds are placed on its speech by a forced alignment ([`crate::lipalign`]). Without text,
-//! shapes come from the sound alone. Either way, neighbours showing the same head frame merge, shapes are held a
-//! minimum time, changes are capped per second, and pauses show the silent mouth.
+//! the same model picks the likeliest sounds from the sound alone. Either way, neighbours showing the same head frame
+//! merge, shapes are held a minimum time, changes are capped per second, and pauses show the silent mouth.
 
 use crate::g2p::Token;
 use crate::lip::{self, CLOSED, HEAD_FRAME, Lip, Marker};
@@ -28,19 +28,16 @@ pub struct Params {
     pub silence: f32,
     /// Shapes start this much before their sound, as the original lip files' do.
     pub lead: f32,
-    /// From the sound alone, a dip closes the lips only with at least this share of its energy under 1 kHz ...
-    pub closed_low: f32,
-    /// ... and at most this many zero crossings per sample (a hum, not a hiss); other dips show a tongue consonant.
-    pub closed_zcr: f32,
 }
 
 impl Default for Params {
     fn default() -> Params {
         Params {
             speech: SpeechParams::default(),
-            // Against forced alignments of Fallout 2's lines (tuning half of the speakers), 4 placed the m, b and p
-            // of 89.5% and 8 of 89.6%, with more of f and v (84.0% to 81.9%); 16 no better.
-            duration_weight: 8.0,
+            // Against forced alignments of Fallout 2's lines (held-out half of the speakers), the frames' fit at half
+            // this weight (the costs in `lipalign` doubled to match) placed f and v better than at the same weight
+            // (95.9% to 93.2%), the rest alike.
+            duration_weight: 16.0,
             // Shorter than a 40 ms shape is a flicker; at 50 ms the sound-only shapes, with fewer closures, moved less
             // than Interplay's (5.7 changes a second to its 6.8, tuning half), at 40 ms 6.5.
             hold: 0.04,
@@ -52,11 +49,6 @@ impl Default for Params {
             // of the pauses.
             silence: 0.1,
             lead: 0.03,
-            // Interplay closes the lips at a sixth of the dips, more often at a hum than a hiss. Closing at every dip
-            // gave 2.3 closures per run of m, b and p in the text; these give 1.0 (tuning half) and raise agreement
-            // (held-out 33.9% to 34.9%).
-            closed_low: 0.72,
-            closed_zcr: 0.05,
         }
     }
 }
@@ -69,12 +61,10 @@ pub fn generate(name: &str, audio: &Audio, tokens: Option<&[Token]>, p: &Params)
         .filter(|t| t.iter().any(|x| !matches!(x, Token::Break)))
         .map(|t| lipalign::align(t, &a, f64::from(p.duration_weight)))
         .filter(|v| !v.is_empty());
+    // No text, or more sounds than the speech has frames for: the sounds heard.
+    let placed = placed.unwrap_or_else(|| lipalign::recognise(&a, 0..a.frames.len()));
     let mut shapes = vec![Shape { start: 0.0, code: 0 }];
-    match placed {
-        Some(placed) => text_shapes(&placed, &a, p, &mut shapes),
-        // No text, or more sounds than the speech has frames for.
-        None => audio_shapes(&a, p, 0..a.frames.len(), &mut shapes),
-    }
+    placed_shapes(&placed, &a, p, &mut shapes);
     let mut shapes = clean(shapes, total, &a, p);
     let lead = f64::from(p.lead) * f64::from(speech::FRAMES_PER_SECOND);
     for s in shapes.iter_mut().skip(1) {
@@ -100,17 +90,16 @@ impl Shape {
     }
 }
 
-/// Without text, a dip this deep (dB) under both sides within 50 ms is taken as a syllable boundary.
-const SYLLABLE_DIP: f32 = 2.0;
-
 /// The placed sounds as shapes: each sound from its start; a pause inside the line shown as the silent mouth only when
 /// longer than `p.silence` (a shorter one keeps the shape before it), the edges' always; speech the text lacks shaped
-/// from the sound alone.
-fn text_shapes(placed: &[lipalign::Placed], a: &speech::Analysis, p: &Params, out: &mut Vec<Shape>) {
+/// from the sounds heard there.
+fn placed_shapes(placed: &[lipalign::Placed], a: &speech::Analysis, p: &Params, out: &mut Vec<Shape>) {
     let silence = f64::from(p.silence) * f64::from(speech::FRAMES_PER_SECOND);
     for x in placed {
         let code = match x.what {
             lipalign::What::Sound(code) => code,
+            // Showing only a pause's quiet part (outside the stretches of speech) left the mouth open through more of
+            // the silence (forced alignments: 1.7% to 15.2%), as those stretches take in breaths.
             lipalign::What::Pause => {
                 let inside = x.start > 0 && x.start + x.len < a.frames.len();
                 if inside && (x.len as f64) < silence {
@@ -119,75 +108,13 @@ fn text_shapes(placed: &[lipalign::Placed], a: &speech::Analysis, p: &Params, ou
                 0
             }
             lipalign::What::Unscripted => {
-                audio_shapes(a, p, x.start..x.start + x.len, out);
+                placed_shapes(&lipalign::recognise(a, x.start..x.start + x.len), a, p, out);
                 continue;
             }
         };
         out.push(Shape {
             start: x.start as f64,
             code,
-        });
-    }
-}
-
-/// Shapes from the sound alone, frame by frame inside speech within `span`: closed lips at humming dips, a tongue
-/// consonant at the other dips, a hiss shape for noisy frames, and openness by loudness under the stretch's peak.
-fn audio_shapes(a: &speech::Analysis, p: &Params, span: std::ops::Range<usize>, out: &mut Vec<Shape>) {
-    const REACH: usize = 15;
-    let side = |r: std::ops::Range<usize>| a.frames[r].iter().map(|x| x.db).fold(f32::MIN, f32::max);
-    let segments = a.segments.iter().filter_map(|s| {
-        let (start, end) = (s.start.max(span.start), s.end.min(span.end));
-        (start < end).then_some(speech::Segment { start, end })
-    });
-    for s in segments {
-        let mut codes: Vec<u8> = (s.start..s.end)
-            .map(|f| {
-                let fr = a.frames[f];
-                // Openness against the loudest frame within 150 ms, so each syllable opens and closes.
-                let peak = side(f.saturating_sub(REACH).max(s.start)..(f + REACH + 1).min(s.end));
-                if fr.zcr > 0.15 && fr.low < 0.5 {
-                    27
-                } else if fr.db > peak - 6.0 {
-                    6
-                } else if fr.db > peak - 14.0 {
-                    4
-                } else {
-                    13
-                }
-            })
-            .collect();
-        // A consonant spans each syllable boundary, over 30 ms either side: closed lips at a deep dip that hums (see
-        // `Params::closed_low`), a tongue consonant at other deep dips and at shallower ones (SYLLABLE_DIP under both
-        // sides within 50 ms).
-        for f in s.start + 1..s.end.saturating_sub(1) {
-            let fr = a.frames[f];
-            let d = fr.db;
-            let dip = a.dips.contains(&f);
-            let code = if dip && fr.low >= p.closed_low && fr.zcr <= p.closed_zcr {
-                32
-            } else if dip
-                || (side(f.saturating_sub(5).max(s.start)..f) - d >= SYLLABLE_DIP
-                    && side(f + 1..(f + 6).min(s.end)) - d >= SYLLABLE_DIP)
-            {
-                19
-            } else {
-                continue;
-            };
-            for c in &mut codes[f.saturating_sub(3).max(s.start) - s.start..(f + 4).min(s.end) - s.start] {
-                *c = code;
-            }
-        }
-        for (i, &code) in codes.iter().enumerate() {
-            if out.last().is_none_or(|l| l.code != code) {
-                out.push(Shape {
-                    start: (s.start + i) as f64,
-                    code,
-                });
-            }
-        }
-        out.push(Shape {
-            start: s.end as f64,
-            code: 0,
         });
     }
 }
@@ -308,17 +235,14 @@ mod tests {
 
     const RATE: u32 = 22050;
 
-    /// `(seconds, amplitude)` pieces of a voiced tone, or silence at amplitude 0.
+    /// `(seconds, amplitude)` pieces of a held vowel, or silence at amplitude 0.
     fn sound(pieces: &[(f32, f32)]) -> Audio {
-        let mut out: Vec<i16> = Vec::new();
-        for &(secs, amp) in pieces {
-            for _ in 0..(secs * RATE as f32).round() as usize {
-                let t = out.len() as f32 / RATE as f32;
-                let v = (t * 150.0 * std::f32::consts::TAU).sin() + 0.4 * (t * 450.0 * std::f32::consts::TAU).sin();
-                out.push((amp * v) as i16);
-            }
-        }
-        Audio::from_i16(RATE, 1, out)
+        let amps: Vec<f32> = pieces
+            .iter()
+            .flat_map(|&(secs, amp)| std::iter::repeat_n(amp, (secs * RATE as f32).round() as usize))
+            .collect();
+        let voice = crate::testaudio::vowel(amps.len(), RATE);
+        Audio::from_i16(RATE, 1, voice.iter().zip(&amps).map(|(v, a)| (v * a) as i16).collect())
     }
 
     /// The head frame shown at `secs`.
@@ -437,11 +361,11 @@ mod tests {
             db: -20.0,
             zcr: 0.1,
             low: 0.5,
+            cep: [0.0; speech::CEPSTRA],
         };
         let a = speech::Analysis {
             frames: vec![frame; 200],
             segments: vec![speech::Segment { start: 0, end: 200 }],
-            dips: Vec::new(),
         };
         let mut shapes = vec![Shape { start: 0.0, code: 0 }];
         let mut at = 10.0;
@@ -487,11 +411,26 @@ mod tests {
 
     #[test]
     fn a_break_over_a_pause_is_silent_and_one_in_speech_is_not() {
-        let audio = sound(&[(0.2, 0.0), (0.5, 9000.0), (0.2, 0.0), (0.5, 9000.0), (0.2, 0.0)]);
+        // Syllables at a speaking rate: 150 ms of vowel, then a 40 ms dip where a consonant falls. Speech held much
+        // longer than the text's sounds last has the model's silence, the broadest of its classes, take the rest.
+        let syllable = [(0.15, 9000.0), (0.04, 700.0)];
+        let silent = [(0.2, 0.0)];
+        let audio = sound(
+            &[
+                &silent[..],
+                &syllable,
+                &syllable,
+                &silent,
+                &syllable,
+                &syllable,
+                &silent,
+            ]
+            .concat(),
+        );
         let lip = generate("test", &audio, Some(&tokens("one two, three four")), &Params::default());
         check_valid(&lip, &audio);
-        assert_eq!(frame_at(&lip, 0.8), 0, "the pause holds the comma");
-        let joined = sound(&[(0.2, 0.0), (1.2, 9000.0), (0.2, 0.0)]);
+        assert_eq!(frame_at(&lip, 0.68), 0, "the pause holds the comma");
+        let joined = sound(&[&silent[..], &syllable.repeat(4), &silent].concat());
         let lip = generate(
             "test",
             &joined,
@@ -499,7 +438,8 @@ mod tests {
             &Params::default(),
         );
         check_valid(&lip, &joined);
-        for t in [0.3, 0.5, 0.7, 0.9, 1.1, 1.3] {
+        // The middle of each vowel.
+        for t in [0.27, 0.46, 0.65, 0.84] {
             assert_ne!(frame_at(&lip, t), 0, "speech at {t}");
         }
     }

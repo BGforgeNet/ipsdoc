@@ -1,5 +1,5 @@
-//! Where a speech sound is speaking: loudness per 10 ms frame against the line's own noise floor, the stretches of
-//! speech, and the dips inside them, plus per-frame features for choosing mouth shapes.
+//! Where a speech sound is speaking: loudness per 10 ms frame against the line's own noise floor and the stretches of
+//! speech, plus per-frame features for choosing mouth shapes.
 
 use crate::pcm::Audio;
 
@@ -17,8 +17,6 @@ pub struct SpeechParams {
     pub on: f32,
     /// ... and ends below this share.
     pub off: f32,
-    /// A dip is at least this many dB below the loudest frame within 50 ms on each side.
-    pub dip_depth: f32,
 }
 
 impl Default for SpeechParams {
@@ -28,7 +26,6 @@ impl Default for SpeechParams {
             min_speech: 0.03,
             on: 0.35,
             off: 0.25,
-            dip_depth: 6.0,
         }
     }
 }
@@ -42,7 +39,13 @@ pub struct Frame {
     pub zcr: f32,
     /// Share of the energy below about 1 kHz.
     pub low: f32,
+    /// The spectrum's shape: mel-frequency cepstral coefficients 1 to [`CEPSTRA`] over 25 ms, which tell vowels and
+    /// consonants apart where loudness cannot.
+    pub cep: [f32; CEPSTRA],
 }
+
+/// Cepstral coefficients per frame.
+pub const CEPSTRA: usize = 12;
 
 /// Frames `start..end`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,8 +63,6 @@ pub struct Analysis {
     pub frames: Vec<Frame>,
     /// Stretches of speech, in order.
     pub segments: Vec<Segment>,
-    /// Frames, inside speech, where the loudness dips.
-    pub dips: Vec<usize>,
 }
 
 /// The audio frame where 10 ms frame `f` starts: `round(f * rate / 100)`, exact over any length (220.5 audio frames
@@ -77,6 +78,12 @@ const SILENT_PEAK: f32 = -60.0;
 const MIN_RANGE: f32 = 30.0;
 /// The low band's corner (Hz).
 const LOW_HZ: f32 = 1000.0;
+/// The cepstrum's window (seconds), mel bands and their span (Hz): the usual speech settings, the top kept under the
+/// Nyquist frequency of 16 kHz audio so every rate gives the same coefficients.
+const CEP_WINDOW: f32 = 0.025;
+const MEL_BANDS: usize = 24;
+const MEL_LOW_HZ: f32 = 100.0;
+const MEL_HIGH_HZ: f32 = 7000.0;
 
 /// Analyses `audio`.
 pub fn analyse(audio: &Audio, p: &SpeechParams) -> Analysis {
@@ -93,7 +100,8 @@ pub fn analyse(audio: &Audio, p: &SpeechParams) -> Analysis {
     let mut low_state = 0.0f32;
     let mut energy = Vec::with_capacity(count);
     let mut frames = Vec::with_capacity(count);
-    for f in 0..count {
+    let cepstra = cepstra(&mono, rate, count);
+    for (f, &cep) in cepstra.iter().enumerate() {
         let block = &mono[frame_start(f, rate).min(mono.len())..frame_start(f + 1, rate).min(mono.len())];
         let (mut e, mut low, mut crossings) = (0.0f32, 0.0f32, 0usize);
         for (i, &x) in block.iter().enumerate() {
@@ -110,6 +118,7 @@ pub fn analyse(audio: &Audio, p: &SpeechParams) -> Analysis {
             db: 0.0,
             zcr: crossings as f32 / n,
             low: if e > 0.0 { (low / e).min(1.0) } else { 0.0 },
+            cep,
         });
     }
     let db = |e: f32| 10.0 * e.max(1e-18).log10();
@@ -119,8 +128,73 @@ pub fn analyse(audio: &Audio, p: &SpeechParams) -> Analysis {
         frame.db = db(window.iter().sum::<f32>() / window.len() as f32);
     }
     let segments = segments(&raw, p);
-    let dips = dips(&frames, &segments, p);
-    Analysis { frames, segments, dips }
+    Analysis { frames, segments }
+}
+
+/// Per frame, the cepstrum of the 25 ms around its middle: pre-emphasised, Hamming-windowed, its power summed into
+/// triangular mel bands, their logs turned into coefficients by a cosine transform. Coefficient 0, the loudness, is left
+/// out.
+#[expect(
+    clippy::expect_used,
+    reason = "the transform's buffers come from its own plan, so their lengths always match"
+)]
+fn cepstra(mono: &[f32], rate: u32, count: usize) -> Vec<[f32; CEPSTRA]> {
+    use std::f32::consts::{PI, TAU};
+    let len = ((CEP_WINDOW * rate as f32).round() as usize).max(2);
+    let size = len.next_power_of_two();
+    let fft = realfft::RealFftPlanner::<f32>::new().plan_fft_forward(size);
+    let (mut input, mut spectrum) = (fft.make_input_vec(), fft.make_output_vec());
+    let window: Vec<f32> = (0..len)
+        .map(|i| 0.54 - 0.46 * (TAU * i as f32 / (len - 1) as f32).cos())
+        .collect();
+    let mel = |hz: f32| 2595.0 * (1.0 + hz / 700.0).log10();
+    let (low, high) = (mel(MEL_LOW_HZ), mel(MEL_HIGH_HZ.min(rate as f32 / 2.0)));
+    let edges: Vec<f32> = (0..MEL_BANDS + 2)
+        .map(|m| 700.0 * (10f32.powf((low + (high - low) * m as f32 / (MEL_BANDS + 1) as f32) / 2595.0) - 1.0))
+        .collect();
+    // Per band, (bin, weight) for each spectrum bin inside its triangle.
+    let bands: Vec<Vec<(usize, f32)>> = (0..MEL_BANDS)
+        .map(|m| {
+            let (a, b, c) = (edges[m], edges[m + 1], edges[m + 2]);
+            (0..spectrum.len())
+                .filter_map(|bin| {
+                    let hz = bin as f32 * rate as f32 / size as f32;
+                    let w = if hz <= b {
+                        (hz - a) / (b - a)
+                    } else {
+                        (c - hz) / (c - b)
+                    };
+                    (w > 0.0).then_some((bin, w))
+                })
+                .collect()
+        })
+        .collect();
+    let cosines: Vec<[f32; MEL_BANDS]> = (1..=CEPSTRA)
+        .map(|k| std::array::from_fn(|m| (PI * k as f32 * (m as f32 + 0.5) / MEL_BANDS as f32).cos()))
+        .collect();
+    let emphasised = |j: usize| mono[j] - 0.97 * if j > 0 { mono[j - 1] } else { 0.0 };
+    (0..count)
+        .map(|f| {
+            // The window centres on the frame's middle; before the sound's start and past its end it reads zeros.
+            let middle = (frame_start(f, rate) + frame_start(f + 1, rate)) / 2;
+            input.fill(0.0);
+            for (i, w) in window.iter().enumerate() {
+                if let Some(j) = (middle + i).checked_sub(len / 2).filter(|&j| j < mono.len()) {
+                    input[i] = w * emphasised(j);
+                }
+            }
+            fft.process(&mut input, &mut spectrum).expect("buffers from the plan");
+            let logs: [f32; MEL_BANDS] = std::array::from_fn(|m| {
+                bands[m]
+                    .iter()
+                    .map(|&(bin, w)| w * spectrum[bin].norm_sqr())
+                    .sum::<f32>()
+                    .max(1e-10)
+                    .ln()
+            });
+            std::array::from_fn(|k| cosines[k].iter().zip(&logs).map(|(c, l)| c * l).sum())
+        })
+        .collect()
 }
 
 fn percentile(values: &[f32], q: f32) -> f32 {
@@ -167,41 +241,6 @@ fn segments(db: &[f32], p: &SpeechParams) -> Vec<Segment> {
         }
     }
     out.retain(|s| s.end - s.start >= frames(p.min_speech).max(1));
-    out
-}
-
-/// Inside each segment, the middle of each run of frames that lie `dip_depth` under the loudest frame within 50 ms
-/// on both sides.
-fn dips(frames: &[Frame], segments: &[Segment], p: &SpeechParams) -> Vec<usize> {
-    const REACH: usize = 5;
-    let mut out = Vec::new();
-    for s in segments {
-        let mut run: Option<(usize, usize)> = None;
-        for f in s.start..s.end {
-            let d = frames[f].db;
-            let left = frames[f.saturating_sub(REACH).max(s.start)..f]
-                .iter()
-                .map(|x| x.db)
-                .fold(f32::MIN, f32::max);
-            let right = frames[f + 1..(f + 1 + REACH).min(s.end)]
-                .iter()
-                .map(|x| x.db)
-                .fold(f32::MIN, f32::max);
-            let dip = left - d >= p.dip_depth && right - d >= p.dip_depth;
-            run = match (run, dip) {
-                (None, true) => Some((f, f)),
-                (Some((a, _)), true) => Some((a, f)),
-                (Some((a, b)), false) => {
-                    out.push((a + b) / 2);
-                    None
-                }
-                (None, false) => None,
-            };
-        }
-        if let Some((a, b)) = run {
-            out.push((a + b) / 2);
-        }
-    }
     out
 }
 
@@ -280,15 +319,6 @@ mod tests {
     }
 
     #[test]
-    fn finds_a_dip_inside_speech() {
-        let pieces = [(0.2, 0.0), (0.3, 8000.0), (0.04, 1000.0), (0.3, 8000.0), (0.2, 0.0)];
-        let a = analyse(&mono(&pieces, 0.0), &SpeechParams::default());
-        near(&bounds(&a), &[(0.2, 0.84)]);
-        assert_eq!(a.dips.len(), 1, "{:?}", a.dips);
-        assert!((a.dips[0] as f32 / 100.0 - 0.52).abs() <= 0.021, "{:?}", a.dips);
-    }
-
-    #[test]
     fn stereo_reads_as_its_mix() {
         let m = signal(&BURSTS, 0.0);
         let st: Vec<i16> = m.iter().flat_map(|&s| [s, s]).collect();
@@ -297,7 +327,7 @@ mod tests {
             analyse(&Audio::from_i16(RATE, 2, st), &SpeechParams::default()),
         );
         assert_eq!(am.segments, ast.segments);
-        assert_eq!(am.dips, ast.dips);
+        assert_eq!(am.frames, ast.frames);
     }
 
     #[test]

@@ -33,7 +33,7 @@ const QUIET_MARGIN: usize = 15;
 /// A sound with fewer quiet frames than this has no quiet to judge.
 const QUIET_MIN: usize = 20;
 /// A mouth open through more of the quiet frames than this is a warning: on 5% of Interplay's files with quiet to
-/// judge, none of ours or wav2lip's, three quarters of the originals moved 500 ms late or shuffled, and every file
+/// judge, none of ours from the text or wav2lip's, 0.5% of ours from the sound, three quarters of the originals moved 500 ms late or shuffled, and every file
 /// holding one open shape.
 const OPEN_QUIET_LIMIT: f64 = 0.5;
 /// Speech shorter than this (frames) has too few shapes for a rate.
@@ -44,7 +44,7 @@ const MOVEMENT_MIN_FRAMES: usize = 100;
 const MOVEMENT: (f64, f64) = (2.0, 20.0);
 /// One shape held through more than this of unbroken speech (seconds) is a warning, a mouth frozen while the voice
 /// goes on. With their text: on 3.1% of Interplay's files (holds in plain speech, most under 1 s, and rests through a
-/// cough; their median 0.33), 6% of ours from the text, 25% from the sound alone, and 68% of wav2lip's.
+/// cough; their median 0.33), 6.5% of ours from the text, 5.8% from the sound alone, and 68% of wav2lip's.
 const HOLD_LIMIT: f64 = 0.65;
 /// A line whose text draws a word out ("Riiiight...", "Rrrrooow") may hold a shape this long ...
 const DRAWN_HOLD_LIMIT: f64 = 1.5;
@@ -60,7 +60,7 @@ const OFFSET_MIN_SECONDS: f64 = 2.0;
 /// An offset is reported when the mouth aligns this well there ...
 const OFFSET_ALIGNMENT: f64 = 0.7;
 /// ... and this much better than within the unseen offsets, and better than chance ([`CHANCE_COPIES`]). It flags
-/// 0.4% of Interplay's lines, 0.1% of ours from the text and 0.2% from the sound; 19% of the originals moved 100 ms
+/// 0.4% of Interplay's lines, 0.4% of ours from the text and 0.1% from the sound; 19% of the originals moved 100 ms
 /// late, 53% moved 200 ms late. Interplay's lines 100 ms early get 2.5%.
 const OFFSET_GAIN: f64 = 0.08;
 /// A far offset needs a line this long (seconds) ...
@@ -73,16 +73,16 @@ const FAR_OFFSET_GAIN: f64 = 0.25;
 const CHANCE_COPIES: usize = 19;
 /// A directory of at least this many lip files is graded as a set, where chance evens out ...
 const SET_MIN: usize = 15;
-/// ... and warned about below this median alignment: Fallout 2's 11 speech directories have 0.67 to 0.96, ours 0.89
-/// to 0.98; speakers' sets of other lines' lip files 0.52 to 0.75, so width catches those alignment misses ...
+/// ... and warned about below this median alignment: Fallout 2's 11 speech directories have 0.67 to 0.96, ours 0.87
+/// to 0.99; speakers' sets of other lines' lip files 0.52 to 0.75, so width catches those alignment misses ...
 const SET_ALIGNMENT: f64 = 0.6;
 /// ... or above this median share of the loud speech shown shut: Fallout 2's directories have 0.06 to 0.25, ours
-/// 0.01 to 0.08 per speaker, wav2lip's 0.78 to 0.90 ...
+/// 0.02 to 0.15 per speaker, wav2lip's 0.78 to 0.90 ...
 const SET_SHUT: f64 = 0.35;
 /// ... or with a median of closures per m, b and p outside these: Fallout 2's directories have 0.75 to 1.50,
 /// wav2lip's 0 (it never closes the lips) ...
 const SET_CLOSURES: (f64, f64) = (0.5, 1.6);
-/// ... or below this median openness: Fallout 2's directories have 0.23 to 0.51, ours 0.51 to 0.68, wav2lip's 0.21
+/// ... or below this median openness: Fallout 2's directories have 0.23 to 0.51, ours 0.45 to 0.70, wav2lip's 0.21
 /// to 0.31, other lines' lip files and the originals moved 200 ms or more or shuffled 0.13 at most ...
 const SET_OPENNESS: f64 = 0.16;
 /// ... or above this median share of the quiet shown open: Fallout 2's directories have 0 to 0.06, other lines' lip
@@ -94,8 +94,8 @@ const SET_MOVEMENT: (f64, f64) = (4.0, 12.0);
 /// Interplay's lip files close the lips once per m, b or p of the text (the middle half of them exactly once); a
 /// lip file closing them at a ratio outside these ...
 const CLOSURES: (f64, f64) = (0.67, 1.5);
-/// ... with under this share of the m, b and p met by a closure nearby, misses the words: Interplay's 3%, none of ours
-/// from the text, from the sound alone 26% (it cannot know them), another line's lip file stretched to fit 41%,
+/// ... with under this share of the m, b and p met by a closure nearby, misses the words: Interplay's 3%, 0.1% of ours
+/// from the text, from the sound alone 19% (it cannot know them), another line's lip file stretched to fit 41%,
 /// wav2lip's all.
 const PLACED: f64 = 0.25;
 /// A closure meets an m, b or p within this many frames of where the sound falls with the line's phones spread
@@ -794,10 +794,11 @@ mod tests {
             lo + (seed % (hi - lo) as u64) as usize
         };
         let (mut samples, mut bursts) = (vec![0i16; rate / 4], Vec::new());
+        let voice = crate::testaudio::vowel(3 * rate, rate as u32);
         while samples.len() < 3 * rate - rate / 2 {
             let on = next(80, 250) * rate / 1000;
             let start = samples.len();
-            samples.extend((0..on).map(|i| (12000.0 * ((start + i) as f64 * 0.04).sin()) as i16));
+            samples.extend(voice[start..start + on].iter().map(|v| (12000.0 * v) as i16));
             bursts.push((start, samples.len()));
             samples.extend(std::iter::repeat_n(0, next(40, 150) * rate / 1000));
         }

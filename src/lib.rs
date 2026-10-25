@@ -32,4 +32,6 @@ pub mod pcm;
 pub mod print;
 pub mod repair;
 pub mod speech;
+#[cfg(test)]
+mod testaudio;
 pub mod wavc;

@@ -5,7 +5,9 @@
 - **Text.** With the line's text (English), each word's sounds come from the CMU Pronouncing Dictionary, or
   letter-to-sound rules for words it lacks, and are placed on the speech by a forced alignment against a model of how
   each sound sounds and how long it lasts, fitted to Fallout 2's own voiced lines. The dialog `.msg` names each line's
-  sound: `ipsdoc lip --msg dialog/nhmyron.msg myn1003a.acm`. Without text, mouth shapes come from the sound.
+  sound: `ipsdoc lip --msg dialog/nhmyron.msg myn1003a.acm`. Without text, the same model picks the likeliest run of
+  sounds from the sound alone. The model judges each 10 ms by its loudness and its spectrum (mel-frequency cepstral
+  coefficients).
 - **Checks.** A lip file names the sound the game loads for it, and should end with that sound; `check` reports a name
   mismatch, phoneme codes the original game misreads (42 and up), and markers out of order. A lip file ending off its
   sound by under 50 ms passes, as no player sees it; up to 150 ms is a warning; more, or a length 2 or 4 times off (made
@@ -29,7 +31,7 @@
   them, English), `check` also counts the closed-lips shapes against each line's m, b and p, a run of them (the m b of
   "remember") counted once: Interplay's files close the lips once for each. A lip file closing them under 0.67 or over
   1.5 times as often, with under a quarter of the m, b and p met by a closure near where they fall, gets a warning. That
-  warns on 3% of Fallout 2's own files, none of `ipsdoc lip --msg`'s, 26% of `ipsdoc lip`'s from the sound alone (which
+  warns on 3% of Fallout 2's own files, 0.1% of `ipsdoc lip --msg`'s, 19% of `ipsdoc lip`'s from the sound alone (which
   cannot know the words), and 41% of lip files made for another line. The directory grade adds the median closures per
   m, b and p, with a warning outside 0.5 to 1.6 (Fallout 2's directories: 0.75 to 1.50). A line whose text draws a word
   out ("Riiiight...", three or more of a letter) may hold a shape up to 1.5 s and change shape once a second.

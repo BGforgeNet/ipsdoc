@@ -12,6 +12,13 @@ use ipsdoc::input::{ReadOptions, read};
 use ipsdoc::output::{OutputFormat, WriteOptions, write};
 use ipsdoc::pcm::{Audio, Samples};
 
+#[path = "../src/testaudio.rs"]
+#[expect(
+    dead_code,
+    reason = "the library's test sounds, of which these tests need only the vowel"
+)]
+mod testaudio;
+
 /// A scratch directory, removed when dropped.
 struct Dir(PathBuf);
 
@@ -640,8 +647,9 @@ fn lip_rescale_fits_a_lip_to_another_sound() {
     assert_eq!(d.files(), ["big.acm", "x.acm", "x.lip"]);
 }
 
-/// Three seconds of tone bursts 80 to 250 ms long with pauses between, irregular as syllables are.
+/// Three seconds of vowels 80 to 250 ms long with pauses between, irregular as syllables are.
 fn talk() -> Audio {
+    let voice = testaudio::vowel(3 * 22050, 22050);
     let spans = [
         (120, 60),
         (230, 90),
@@ -657,7 +665,11 @@ fn talk() -> Audio {
     let mut samples = vec![0i16; 22050 / 4];
     for (on, off) in spans {
         let start = samples.len();
-        samples.extend((0..on * 2205 / 100).map(|i| (12000.0 * ((start + i) as f64 * 0.04).sin()) as i16));
+        samples.extend(
+            voice[start..start + on * 2205 / 100]
+                .iter()
+                .map(|v| (12000.0 * v) as i16),
+        );
         samples.extend(std::iter::repeat_n(0, off * 2205 / 100));
     }
     samples.resize(3 * 22050, 0);

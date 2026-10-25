@@ -315,6 +315,7 @@ dependencies = [
  "clap",
  "hound",
  "miniz_oxide",
+ "realfft",
  "rubato",
  "symphonia",
  "thiserror",
