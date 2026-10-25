@@ -16,11 +16,15 @@ impl<'a> BitReader<'a> {
     pub(crate) fn read(&mut self, bits: u32) -> u32 {
         debug_assert!(bits <= 24, "{bits} bits do not fit one 32-bit window");
         let start = (self.pos / 8) as usize;
-        let mut window = [0u8; 4];
-        if let Some(available) = self.data.get(start..) {
-            let n = available.len().min(4);
-            window[..n].copy_from_slice(&available[..n]);
-        }
+        let rest = self.data.get(start..).unwrap_or_default();
+        let window = match rest.first_chunk::<4>() {
+            Some(&whole) => whole,
+            None => {
+                let mut tail = [0u8; 4];
+                tail[..rest.len()].copy_from_slice(rest);
+                tail
+            }
+        };
         let value = (u32::from_le_bytes(window) >> (self.pos % 8)) & ((1 << bits) - 1);
         self.pos += u64::from(bits);
         value

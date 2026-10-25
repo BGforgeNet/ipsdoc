@@ -449,19 +449,18 @@ fn transform(block: &mut [i32], levels: u32, rows: usize, state: &mut [i32]) {
 }
 
 /// One stage over the block seen as `height` rows of `width` columns: per column, each pair of rows (x0, x1) with
-/// the previous pair (d0, d1) becomes (d0 + 2 d1 + x0, 2 x0 - d1 - x1).
+/// the previous pair (d0, d1) becomes (d0 + 2 d1 + x0, 2 x0 - d1 - x1). `state` holds every column's d0, then every
+/// column's d1. The columns are independent, so the loop goes row pair by row pair, reading memory in order.
 fn stage(block: &mut [i32], width: usize, height: usize, state: &mut [i32]) {
-    for c in 0..width {
-        let (mut d0, mut d1) = (state[2 * c], state[2 * c + 1]);
-        for p in (0..height).step_by(2) {
-            let (i0, i1) = (p * width + c, (p + 1) * width + c);
-            let (x0, x1) = (block[i0], block[i1]);
-            block[i0] = d0.wrapping_add(d1.wrapping_mul(2)).wrapping_add(x0);
-            block[i1] = x0.wrapping_mul(2).wrapping_sub(d1).wrapping_sub(x1);
-            (d0, d1) = (x0, x1);
+    let (d0, d1) = state.split_at_mut(width);
+    for pair in block[..width * height].chunks_exact_mut(2 * width) {
+        let (r0, r1) = pair.split_at_mut(width);
+        for (((x0, x1), d0), d1) in r0.iter_mut().zip(r1).zip(&mut *d0).zip(&mut *d1) {
+            let (a, b) = (*x0, *x1);
+            *x0 = d0.wrapping_add(d1.wrapping_mul(2)).wrapping_add(a);
+            *x1 = a.wrapping_mul(2).wrapping_sub(*d1).wrapping_sub(b);
+            (*d0, *d1) = (a, b);
         }
-        state[2 * c] = d0;
-        state[2 * c + 1] = d1;
     }
 }
 
