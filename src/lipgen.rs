@@ -32,9 +32,9 @@ impl Default for Params {
     fn default() -> Params {
         Params {
             speech: SpeechParams::default(),
-            // Against forced alignments of Fallout 2's lines (tuning half of the speakers), the frames' fit at half
-            // this weight (the costs in `lipalign` doubled to match) placed f and v better than at the same weight
-            // (94.3% to 91.9%), the rest alike; at 8 or 32 fewer frames showed the right shape (81.0%, 79.8% to 81.2%).
+            // Against forced alignments of Fallout 2's lines (tuning half of the speakers): at half this weight fewer f
+            // and v showed their shape (92.2% to 94.5%), at twice it fewer frames showed the right shape (79.8% to
+            // 81.4%).
             duration_weight: 16.0,
             // Shorter than a 40 ms shape is a flicker; at 50 ms the sound-only shapes, with fewer closures, moved less
             // than Interplay's (5.7 changes a second to its 6.8, tuning half), at 40 ms 6.5.

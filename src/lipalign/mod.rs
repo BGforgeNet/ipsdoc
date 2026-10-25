@@ -30,15 +30,18 @@ const BREAK_PAUSE_COST: f64 = 2.0;
 const MAX_PAUSE: usize = 200;
 /// Speech the text lacks before or after it costs this much against the frames' fit. Without it, a line opening with
 /// 3.5 s of speech its text leaves out showed the mouth shut through it; allowed at phrase breaks too, it took breaths
-/// for speech and opened the mouth through more of the silence (against forced alignments, 4.0% to 7.0%).
+/// for speech and opened the mouth through more of the silence (against forced alignments, 4.0% to 7.0%). Half or
+/// twice this cost or either pause cost places the sounds alike (forced alignments, tuning half of the speakers).
 const UNSCRIPTED_COST: f64 = 120.0;
 /// Without text, each stretch [`recognise`] places (a sound or a pause) costs this much against the frames' fit, so it
-/// changes sound only where the frames ask for it ...
+/// changes sound only where the frames ask for it (3 places the sounds alike, 8 shows fewer f and v) ...
 const STRETCH_COST: f64 = 5.0;
 /// ... and closed lips this much more. Without it, a tenth of the speech that is not m, b or p showed closed lips;
-/// with it, 7% (of vowels 2.6%, Interplay's own 5.2%), with half of the m, b and p still closed (forced alignments).
+/// with it, 5.8% (of vowels 2.1%, Interplay's own 4.9%), with 62% of the m, b and p still closed; 1.5 or 5 move along
+/// the same trade (7.0% with 68%, 4.5% with 55%; forced alignments, tuning half).
 const CLOSED_COST: f64 = 3.0;
-/// Without text, how much a sound's length straying from its typical length costs.
+/// Without text, how much a sound's length straying from its typical length costs; half or twice it places the sounds
+/// alike.
 const RECOGNISE_DURATION_WEIGHT: f64 = 1.0;
 /// The shortest a sound lasts (frames). The aligner the model was fitted to gives 30 ms at least; 20 ms leaves room
 /// where a fast line packs its sounds.
