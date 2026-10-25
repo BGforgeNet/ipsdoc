@@ -346,11 +346,12 @@ fn code_of(c: usize) -> u8 {
 /// Per frame `i`, the summed misfit (negative log-likelihood) of frames `0..i` to class `c`.
 fn misfit(x: &[[f32; FEATURES]], c: usize) -> Vec<f64> {
     let mut sums = vec![0.0; x.len() + 1];
+    let log_var: [f64; FEATURES] = std::array::from_fn(|k| f64::from(VAR[c][k]).ln());
     for (i, f) in x.iter().enumerate() {
         let nll: f64 = (0..FEATURES)
             .map(|k| {
                 let (d, v) = (f64::from(f[k] - MEAN[c][k]), f64::from(VAR[c][k]));
-                0.5 * (d * d / v + v.ln())
+                0.5 * (d * d / v + log_var[k])
             })
             .sum();
         sums[i + 1] = sums[i] + nll;
