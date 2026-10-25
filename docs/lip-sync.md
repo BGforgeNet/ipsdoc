@@ -21,8 +21,9 @@
   early), or by a wider margin 310 to 600 ms off (3 s or more), naming the offset, when it also beats what shuffled
   copies of the file manage; a mouth open through more than half the quiet away from speech; a mouth changing shape
   under twice or over 20 times a second of speech; one shape held through over 650 ms of unbroken speech. A directory of
-  15 or more lip files gets a grade, the medians of its files' figures: alignment (the chance that an open-mouth frame
-  of speech is louder than one at rest: 0.5 is chance; closed lips count on neither side, as an m is voiced), width (the
+  15 or more lip files it could judge (a sound beside each, of the length the file was made for, codes the game knows,
+  and speech in it) gets a grade, the medians of its files' figures: alignment (the chance that an open-mouth frame of
+  speech is louder than one at rest: 0.5 is chance; closed lips count on neither side, as an m is voiced), width (the
   rank correlation of how wide the mouth opens with the loudness: 0 is chance), the shares of the loud speech shown shut
   (and how much of it closed lips) and of the quiet shown open, and shape changes a second. It warns below 0.6 alignment
   or 0.16 width, above 35% shut or 25% open, or outside 4 to 12 changes. Fallout 2's own speech directories grade 0.67

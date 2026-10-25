@@ -8,7 +8,8 @@
 //!
 //! Sounds: [`detect`] names a file's container by its first bytes; [`input`] reads it into [`pcm::Audio`], ACM and
 //! WAVC through [`acm`] and [`wavc`] with [`analysis`] weighing their headers against the content; [`output`]
-//! writes audio in any container; [`repair`] corrects headers in place from what reading established.
+//! writes audio as ACM, WAVC, RIFF WAV or Ogg Vorbis; [`repair`] corrects headers in place from what reading
+//! established, and lip files' length fields from their last marker.
 //!
 //! Lip sync: [`msg`] finds a voiced line's text, [`g2p`] turns it into phonemes, [`speech`] analyses the sound,
 //! [`lipalign`] places the phonemes on it (or picks the likeliest from the sound alone), and [`lipgen`] shapes them
