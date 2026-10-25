@@ -50,11 +50,6 @@ pub enum Arpabet {
 }
 
 impl Arpabet {
-    /// The symbol, upper case, without stress.
-    pub fn symbol(self) -> &'static str {
-        SYMBOLS[self as usize].0
-    }
-
     /// Whether it is a vowel (the dictionary gives vowels a stress digit).
     pub fn is_vowel(self) -> bool {
         use Arpabet::*;
@@ -462,7 +457,6 @@ mod phone_tests {
     fn symbols_are_in_variant_order() {
         for (i, (sym, a)) in SYMBOLS.iter().enumerate() {
             assert_eq!(*a as usize, i, "{sym}");
-            assert_eq!(a.symbol(), *sym);
         }
     }
 

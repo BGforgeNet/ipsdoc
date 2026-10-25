@@ -18,10 +18,8 @@ pub struct Params {
     /// In placing the text's sounds, how much a sound's length straying from its typical length costs against its
     /// frames' fit.
     pub duration_weight: f32,
-    /// The shortest a shape is held ...
+    /// The shortest a shape is held; closed lips (m, p, b) first borrow the time from a neighbour.
     pub hold: f32,
-    /// ... except closed lips (m, p, b), held at least this long.
-    pub closed_hold: f32,
     /// At most this many shape changes per second.
     pub max_rate: f32,
     /// With text, pauses inside the line longer than this show the silent mouth.
@@ -41,7 +39,6 @@ impl Default for Params {
             // Shorter than a 40 ms shape is a flicker; at 50 ms the sound-only shapes, with fewer closures, moved less
             // than Interplay's (5.7 changes a second to its 6.8, tuning half), at 40 ms 6.5.
             hold: 0.04,
-            closed_hold: 0.04,
             // A cap of 8 cut placed sounds: f and v from 88.0% to 84.0% (tuning half); the sound alone is the same at
             // either.
             max_rate: 12.0,
@@ -137,18 +134,15 @@ fn clean(mut shapes: Vec<Shape>, total: f64, a: &speech::Analysis, p: &Params) -
     }
     merge_same(&mut v);
     let len = |v: &[Shape], i: usize| v.get(i + 1).map_or(total, |n| n.start) - v[i].start;
-    let (hold, closed_hold) = (f64::from(p.hold) * fps, f64::from(p.closed_hold) * fps);
+    let hold = f64::from(p.hold) * fps;
     // Shapes inside the line that are too short go to their longer neighbour; closed lips first borrow time.
     loop {
         let short = (1..v.len().saturating_sub(1))
-            .filter(|&i| {
-                let least = if v[i].frame() == CLOSED { closed_hold } else { hold };
-                len(&v, i) < least - 1e-9
-            })
+            .filter(|&i| len(&v, i) < hold - 1e-9)
             .min_by(|&x, &y| len(&v, x).total_cmp(&len(&v, y)));
         let Some(i) = short else { break };
         if v[i].frame() == CLOSED {
-            let need = closed_hold - len(&v, i);
+            let need = hold - len(&v, i);
             if len(&v, i + 1) - need >= hold {
                 v[i + 1].start += need;
                 continue;
@@ -282,10 +276,9 @@ mod tests {
         let s = shapes(&lip);
         let inner = &s[1..s.len() - 1];
         assert!(inner.iter().any(|&(f, _)| f == 6), "m, p or b closes the lips: {s:?}");
-        let p = Params::default();
+        let hold = Params::default().hold;
         for &(f, len) in inner {
-            let least = if f == 6 { p.closed_hold } else { p.hold };
-            assert!(len >= least - 0.011, "{f} held {len}: {s:?}");
+            assert!(len >= hold - 0.011, "{f} held {len}: {s:?}");
         }
         assert_eq!(frame_at(&lip, 0.1), 0);
         assert_eq!(frame_at(&lip, 1.1), 0);
