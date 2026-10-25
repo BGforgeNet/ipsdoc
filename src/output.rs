@@ -1,6 +1,6 @@
-//! Writing [`Audio`]: ACM and WAVC lossless with true headers (16-bit, so deeper audio is dithered), RIFF at 8 or 16
-//! bits (deeper audio dithered to 16 unless asked to keep it), Ogg Vorbis through libvorbis (aoTuV and Lancer builds,
-//! via `vorbis_rs`).
+//! Writing [`Audio`]: ACM and WAVC lossless with true headers (16-bit, so deeper audio is dithered), or from the ACM
+//! stream the audio was read from, kept under a new header; RIFF at 8 or 16 bits (deeper audio dithered to 16 unless
+//! asked to keep it), Ogg Vorbis through libvorbis (aoTuV and Lancer builds, via `vorbis_rs`).
 
 use std::io::Cursor;
 use std::num::{NonZeroU8, NonZeroU32};
@@ -106,6 +106,34 @@ pub fn write(audio: &Audio, format: OutputFormat, opts: &WriteOptions) -> Result
         }
         OutputFormat::Riff => riff(audio),
         OutputFormat::Ogg => vorbis(audio, opts.vorbis_quality),
+    }
+}
+
+/// Writes `audio` as `format`, as [`write()`] does, except that ACM and WAVC keep `acm`, the ACM stream `audio` was read
+/// from, instead of encoding it anew: its bitstream byte for byte, under a header stating `audio`'s channel count and
+/// rate. The caller vouches that `acm` decodes to `audio`'s samples.
+///
+/// # Errors
+///
+/// When `acm` has no readable header, an ACM header cannot hold `audio`'s rate, or [`write()`] fails.
+pub fn write_keeping(
+    audio: &Audio,
+    acm: &[u8],
+    format: OutputFormat,
+    opts: &WriteOptions,
+) -> Result<Vec<u8>, OutputError> {
+    let relabelled = || -> Result<Vec<u8>, OutputError> {
+        let header = crate::acm::Header::parse(acm)?
+            .relabelled(audio.channels, audio.rate)
+            .ok_or(OutputError::AcmRate { rate: audio.rate })?;
+        let mut out = header.to_bytes().to_vec();
+        out.extend_from_slice(&acm[crate::acm::Header::LEN..]);
+        Ok(out)
+    };
+    match format {
+        OutputFormat::Acm => relabelled(),
+        OutputFormat::Wavc => Ok(crate::wavc::wrap(&relabelled()?)?),
+        OutputFormat::Riff | OutputFormat::Ogg => write(audio, format, opts),
     }
 }
 
@@ -285,6 +313,16 @@ mod tests {
         let a = Audio::from_i16(96000, 1, vec![0; 10]);
         assert!(matches!(
             write(&a, OutputFormat::Acm, &WriteOptions::default()),
+            Err(OutputError::AcmRate { rate: 96000 })
+        ));
+    }
+
+    #[test]
+    fn a_kept_stream_needs_a_16_bit_rate_too() {
+        let acm = crate::acm::encode(&[1, 2, 3, 4], 1, 22050).unwrap();
+        let a = Audio::from_i16(96000, 1, vec![1, 2, 3, 4]);
+        assert!(matches!(
+            write_keeping(&a, &acm, OutputFormat::Acm, &WriteOptions::default()),
             Err(OutputError::AcmRate { rate: 96000 })
         ));
     }

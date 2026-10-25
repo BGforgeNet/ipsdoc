@@ -81,6 +81,16 @@ impl Header {
         b
     }
 
+    /// This header stating `channels` and `rate` instead, for the same bitstream: the sample count and block layout
+    /// stay, so the stream under it decodes to the same samples. `None` when `rate` does not fit the 16-bit field.
+    pub fn relabelled(&self, channels: u16, rate: u32) -> Option<Header> {
+        Some(Header {
+            channels,
+            rate: u16::try_from(rate).ok()?,
+            ..*self
+        })
+    }
+
     /// Columns per block.
     pub fn cols(&self) -> usize {
         1 << self.levels

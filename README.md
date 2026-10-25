@@ -9,7 +9,7 @@ Also writes and checks Fallout's lip-sync files.
 
 | Command                                      | Does                                                                                                                                                                                                                                                                                                                                                            |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ipsdoc IN [OUT]`, `ipsdoc convert IN [OUT]` | Converts. Without `OUT`: an ACM or WAVC becomes a `.wav`, anything else an `.acm`, beside the input (a WAVC already named `.wav` needs an `OUT`). It names an output it replaces.                                                                                                                                                                               |
+| `ipsdoc IN [OUT]`, `ipsdoc convert IN [OUT]` | Converts. Without `OUT`: an ACM or WAVC becomes a `.wav`, anything else an `.acm`, beside the input (a WAVC already named `.wav` needs an `OUT`). An ACM or WAVC converted to ACM or WAVC keeps its stream, under a new header, unless its samples change. It names an output it replaces.                                                                      |
 | `ipsdoc info FILE... [--msg DIALOG]`         | Shows the headers, how the file reads, and which header fields are wrong; for a lip file, how well it follows its sound (and its line's words, with `--msg`).                                                                                                                                                                                                   |
 | `ipsdoc check PATH... [--msg DIALOG]`        | Decodes each file named and, in directories (recursively), every ACM, WAVC, RIFF and Ogg file, and checks the lip files among them; fails if any does not decode, or a lip file is broken, visibly out of time with the ACM beside it, or keeps the mouth shut while it speaks; grades the lip sync of each directory with 15 or more lip files it could judge. |
 | `ipsdoc repair [--dry-run] FILE...`          | Fixes wrong ACM and WAVC header fields, and lip files' length fields, in place, without re-encoding.                                                                                                                                                                                                                                                            |
@@ -17,10 +17,11 @@ Also writes and checks Fallout's lip-sync files.
 | `ipsdoc lip --rescale LIP --for SOUND`       | Rescales a lip file to another sound (another rate or channel count of the same recording).                                                                                                                                                                                                                                                                     |
 
 `convert` options: `--to acm|wavc|wav|ogg` (otherwise from the output's extension), `--rate R` (resample),
-`--channels N` and `--input-rate R` (read the input as having these, whatever its header says), `--quality Q` (Vorbis,
--1 to 10, default 5), `--raw` with `--raw-rate`, `--raw-channels`, `--raw-bits` (headerless PCM, instead of `--channels`
-and `--input-rate`), `--wrap` (see `docs/quirks.md`), `--full-depth` (a WAV keeps a depth beyond 16 bits; Infinity
-Engine games read WAV up to 16-bit). `ipsdoc --help` and `ipsdoc <command> --help` list everything.
+`--channels N` and `--input-rate R` (read the input as having these, whatever its header says; the samples stay as they
+are), `--quality Q` (Vorbis, -1 to 10, default 5), `--raw` with `--raw-rate`, `--raw-channels`, `--raw-bits` (headerless
+PCM, instead of `--channels` and `--input-rate`), `--wrap` (see `docs/quirks.md`), `--full-depth` (a WAV keeps a depth
+beyond 16 bits; Infinity Engine games read WAV up to 16-bit). `ipsdoc --help` and `ipsdoc <command> --help` list
+everything.
 
 Exit status: 0 when everything succeeded, 1 when a file failed (did not read, decode, check or write), 2 for a request
 that cannot be carried out (bad options, an output that would overwrite the input).
@@ -47,6 +48,9 @@ ipsdoc --quality 8 myn1003a.acm myn1003a.ogg
 
 # Resample to 44100 Hz
 ipsdoc --rate 44100 myn1003a.acm myn1003a-44k.acm
+
+# 44.1 kHz music under a 22050 Hz header: the same stream, its header saying 44100 Hz
+ipsdoc --input-rate 44100 mx0000a.acm fixed/mx0000a.acm
 ```
 
 #### Infinity Engine mods

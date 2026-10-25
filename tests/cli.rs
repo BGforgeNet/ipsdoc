@@ -81,6 +81,97 @@ fn load(path: &Path) -> Audio {
         .audio
 }
 
+/// Bits written least significant first, as ACM stores them.
+#[derive(Default)]
+struct Bits {
+    out: Vec<u8>,
+    acc: u64,
+    pending: u32,
+}
+
+impl Bits {
+    fn put(&mut self, value: u32, bits: u32) {
+        self.acc |= (u64::from(value) & ((1 << bits) - 1)) << self.pending;
+        self.pending += bits;
+        while self.pending >= 8 {
+            self.out.push(self.acc as u8);
+            self.acc >>= 8;
+            self.pending -= 8;
+        }
+    }
+
+    fn finish(mut self) -> Vec<u8> {
+        if self.pending > 0 {
+            self.out.push(self.acc as u8);
+        }
+        self.out
+    }
+}
+
+fn acm_header(samples: usize, channels: u16, rate: u16, levels: u8, rows: u16) -> Vec<u8> {
+    ipsdoc::acm::Header {
+        samples: samples as u32,
+        channels,
+        rate,
+        levels,
+        rows,
+    }
+    .to_bytes()
+    .to_vec()
+}
+
+/// An ACM laid out as ipsdoc's encoder never lays one out (16 rows, every sample a 16-bit linear code), so a
+/// re-encoded copy of it differs from it.
+fn foreign_acm(samples: &[i16], channels: u16, rate: u16) -> Vec<u8> {
+    let mut w = Bits::default();
+    for block in samples.chunks(16) {
+        // pwr 15, val 1, linear filler 16: each code is the sample plus 32768.
+        w.put(15, 4);
+        w.put(1, 16);
+        w.put(16, 5);
+        for i in 0..16 {
+            w.put((i32::from(block.get(i).copied().unwrap_or(0)) + 32768) as u32, 16);
+        }
+    }
+    let mut b = acm_header(samples.len(), channels, rate, 0, 16);
+    b.extend(w.finish());
+    b
+}
+
+/// Two samples at level 1 whose synthesis gives 16384 and 49151, beyond 16 bits (as in the decoder's tests).
+fn overflowing_acm() -> Vec<u8> {
+    let mut w = Bits::default();
+    w.put(15, 4);
+    w.put(1, 16);
+    for v in [32767, -32768i32] {
+        w.put(16, 5);
+        w.put((v + 32768) as u32, 16);
+    }
+    let mut b = acm_header(2, 1, 22050, 1, 1);
+    b.extend(w.finish());
+    b
+}
+
+/// Asserts two byte strings are equal, naming the first difference rather than printing them whole.
+#[track_caller]
+fn same_bytes(got: &[u8], want: &[u8]) {
+    let first = got.iter().zip(want).position(|(g, w)| g != w);
+    assert!(
+        got == want,
+        "{} bytes, {} expected; first difference at {first:?}",
+        got.len(),
+        want.len()
+    );
+}
+
+fn decoded(path: &Path, overflow: ipsdoc::acm::Overflow) -> Vec<i16> {
+    let opts = ReadOptions {
+        overflow,
+        ..ReadOptions::default()
+    };
+    read(&std::fs::read(path).unwrap(), &opts).unwrap().audio.to_i16()
+}
+
 #[track_caller]
 fn ok(out: &Output) -> String {
     assert!(
@@ -235,6 +326,97 @@ fn writes_wavc_when_asked() {
         ipsdoc::detect::Format::Wavc
     );
     assert_eq!(load(&dst), stereo());
+}
+
+#[test]
+fn relabelling_an_acm_keeps_its_stream_and_resampling_re_encodes_it() {
+    let d = Dir::new();
+    let src = d.path("music.acm");
+    let original = foreign_acm(&stereo().to_i16(), 2, 22050);
+    std::fs::write(&src, &original).unwrap();
+    for (flag, value, channels, rate) in [("--input-rate", "44100", 2, 44100), ("--channels", "1", 1, 22050)] {
+        let dst = d.path("relabelled.acm");
+        ok(&ipsdoc(&["convert", s(&src), s(&dst), flag, value]));
+        let out = std::fs::read(&dst).unwrap();
+        assert_eq!(out.len(), original.len(), "{flag}");
+        same_bytes(&out[14..], &original[14..]);
+        let h = ipsdoc::acm::Header::parse(&out).unwrap();
+        let o = ipsdoc::acm::Header::parse(&original).unwrap();
+        assert_eq!(h, ipsdoc::acm::Header { channels, rate, ..o }, "{flag}");
+        assert_eq!(decoded(&dst, Default::default()), stereo().to_i16(), "{flag}");
+    }
+    // Resampling changes the samples, so the stream is encoded anew, as ipsdoc's encoder lays one out.
+    let dst = d.path("resampled.acm");
+    ok(&ipsdoc(&["convert", s(&src), s(&dst), "--rate", "44100"]));
+    let h = ipsdoc::acm::Header::parse(&std::fs::read(&dst).unwrap()).unwrap();
+    assert_eq!((h.rate, h.levels, h.rows), (44100, 0, 256));
+}
+
+#[test]
+fn converting_between_acm_and_wavc_keeps_the_stream() {
+    let d = Dir::new();
+    let (acm, wavc, back, again) = (d.path("a.acm"), d.path("b.wav"), d.path("c.acm"), d.path("d.wav"));
+    let original = foreign_acm(&stereo().to_i16(), 2, 22050);
+    std::fs::write(&acm, &original).unwrap();
+    ok(&ipsdoc(&["convert", s(&acm), s(&wavc), "--to", "wavc"]));
+    let w = std::fs::read(&wavc).unwrap();
+    same_bytes(&w, &ipsdoc::wavc::wrap(&original).unwrap());
+    ok(&ipsdoc(&["convert", s(&wavc), s(&back)]));
+    same_bytes(&std::fs::read(&back).unwrap(), &original);
+    ok(&ipsdoc(&["convert", s(&wavc), s(&again), "--to", "wavc"]));
+    same_bytes(&std::fs::read(&again).unwrap(), &w);
+}
+
+#[test]
+fn a_copied_stream_states_the_channels_its_content_reads_as() {
+    let d = Dir::new();
+    let (src, dst) = (d.path("speech.acm"), d.path("out.acm"));
+    // Mono speech under a stereo header, as Fallout ships it.
+    let mono: Vec<i16> = (0..20000)
+        .map(|n| (3000.0 * (f64::from(n) * 0.031).sin()) as i16)
+        .collect();
+    let original = foreign_acm(&mono, 2, 22050);
+    std::fs::write(&src, &original).unwrap();
+    ok(&ipsdoc(&["convert", s(&src), s(&dst)]));
+    let out = std::fs::read(&dst).unwrap();
+    assert_eq!(ipsdoc::acm::Header::parse(&out).unwrap().channels, 1);
+    same_bytes(&out[14..], &original[14..]);
+}
+
+#[test]
+fn an_overflowing_stream_is_re_encoded_clamped_or_copied_with_wrap() {
+    let d = Dir::new();
+    let (src, dst) = (d.path("loud.acm"), d.path("out.acm"));
+    let original = overflowing_acm();
+    std::fs::write(&src, &original).unwrap();
+    let out = ipsdoc(&["convert", s(&src), s(&dst)]);
+    ok(&out);
+    let note = format!(
+        "{}: lossless, from the input's samples with 1 clamped to 16 bits; add --wrap to keep the original stream, \
+         which the games play wrapped\n",
+        s(&dst)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).ends_with(&note),
+        "{}",
+        all_output(&out)
+    );
+    assert_eq!(
+        ipsdoc::acm::Header::parse(&std::fs::read(&dst).unwrap())
+            .unwrap()
+            .levels,
+        0
+    );
+    assert_eq!(decoded(&dst, ipsdoc::acm::Overflow::Wrap), [16384, 32767]);
+    let out = ipsdoc(&["convert", "--wrap", s(&src), s(&dst)]);
+    ok(&out);
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("--wrap"),
+        "{}",
+        all_output(&out)
+    );
+    same_bytes(&std::fs::read(&dst).unwrap(), &original);
+    assert_eq!(decoded(&dst, ipsdoc::acm::Overflow::Wrap), [16384, -16385]);
 }
 
 #[test]

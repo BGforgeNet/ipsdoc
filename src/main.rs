@@ -33,7 +33,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Converts any readable sound to ACM (lossless), WAVC, RIFF WAV or Ogg Vorbis.
+    /// Converts any readable sound to ACM (lossless, or an ACM or WAVC input's own stream under a new header when its
+    /// samples stay as they are), WAVC, RIFF WAV or Ogg Vorbis.
     Convert(ConvertArgs),
     /// Shows a sound's headers, how it reads, and what in its headers is wrong.
     Info {
@@ -72,9 +73,9 @@ enum Command {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum To {
-    /// Bare ACM, lossless.
+    /// Bare ACM: lossless, or an ACM or WAVC input's own stream when its samples stay as they are.
     Acm,
-    /// WAVC, lossless (Infinity Engine sounds).
+    /// WAVC (Infinity Engine sounds), holding an ACM as above.
     Wavc,
     /// RIFF WAV PCM, 8 or 16-bit: deeper input is dithered to 16 bits, unless --full-depth.
     Wav,
@@ -135,7 +136,8 @@ struct ConvertArgs {
     /// Vorbis quality, -1 to 10.
     #[arg(long, default_value_t = 5.0, value_parser = vorbis_quality, allow_negative_numbers = true)]
     quality: f32,
-    /// Wrap ACM samples beyond 16 bits as the engines do (an audible click), instead of clamping them.
+    /// Wrap ACM samples beyond 16 bits as the engines do (an audible click), instead of clamping them; ACM or WAVC
+    /// output then keeps an ACM or WAVC input's stream even where it overflows.
     #[arg(long)]
     wrap: bool,
     /// Write a WAV at the input's depth (24 or 32-bit, or float) instead of dithering it to 16 bits. Infinity Engine
@@ -261,9 +263,23 @@ fn convert(a: &ConvertArgs) -> Result<(), Failure> {
         }),
     };
     let loaded = input::read(&bytes, &opts).map_err(|e| fail(1, format!("{}: {}", a.input.display(), chain(&e))))?;
+    let mut overflowed = 0;
     for n in &loaded.notes {
         eprintln!("{}: {}", a.input.display(), describe(n));
+        if let Note::Overflowed { samples } = n {
+            overflowed += samples;
+        }
     }
+    // The ACM stream the input holds, which ACM and WAVC output keeps when the samples stay as they are.
+    let stream = match loaded.format {
+        Format::Acm => Some(bytes.as_slice()),
+        Format::Wavc => ipsdoc::wavc::acm_of(&bytes).ok(),
+        Format::Riff | Format::Ogg | Format::Other => None,
+    }
+    .filter(|_| matches!(format, OutputFormat::Acm | OutputFormat::Wavc))
+    .filter(|_| a.rate.is_none_or(|r| r.get() == loaded.audio.rate));
+    // A clamped sample differs from what the stream holds, so the stream is kept only when nothing was clamped.
+    let clamped = stream.is_some() && !a.wrap && overflowed > 0;
     let audio = match a.rate {
         Some(r) => loaded.audio.resample(r.get()).map_err(|e| fail(1, chain(&e)))?,
         None => loaded.audio,
@@ -272,8 +288,11 @@ fn convert(a: &ConvertArgs) -> Result<(), Failure> {
         vorbis_quality: a.quality,
         riff_full_depth: a.full_depth,
     };
-    let out = output::write(&audio, format, &write_opts)
-        .map_err(|e| fail(1, format!("{}: {}", output.display(), chain(&e))))?;
+    let out = match stream.filter(|_| !clamped) {
+        Some(acm) => output::write_keeping(&audio, acm, format, &write_opts),
+        None => output::write(&audio, format, &write_opts),
+    }
+    .map_err(|e| fail(1, format!("{}: {}", output.display(), chain(&e))))?;
     let replaced = output.exists();
     replace_file(&output, &out).map_err(|e| fail(1, format!("{}: {e}", output.display())))?;
     if replaced {
@@ -284,6 +303,12 @@ fn convert(a: &ConvertArgs) -> Result<(), Failure> {
             "{}: 16-bit, from {} input: Infinity Engine games read WAV up to 16-bit; add --full-depth to get lossless output",
             output.display(),
             depth(&audio)
+        );
+    }
+    if clamped {
+        eprintln!(
+            "{}: lossless, from the input's samples with {overflowed} clamped to 16 bits; add --wrap to keep the original stream, which the games play wrapped",
+            output.display()
         );
     }
     Ok(())
