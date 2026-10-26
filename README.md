@@ -82,6 +82,8 @@ $ ipsdoc check music
   [the files' quirks](docs/quirks.md)).
 - `--full-depth`: a WAV keeps a depth beyond 16 bits; Infinity Engine games read WAV up to 16-bit.
 
+ipsdoc writes lossless ACM.
+
 ```sh
 # ACM to WAV, beside the input: myn1003a.wav
 ipsdoc myn1003a.acm
