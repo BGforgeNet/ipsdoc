@@ -1,5 +1,7 @@
 //! Lossless ACM encoding: `levels = 0`, so the engines skip the synthesis transform and each block's coefficients
-//! are its samples.
+//! are its samples. No other `levels` is exact on real audio: each stage's causal inverse grows by 3 + 2 sqrt 2 per
+//! row pair (about 1.27 bits a sample) against the one bit a sample its output shift leaves to steer with, so exact
+//! coefficients outgrow 16 bits within a few samples.
 //!
 //! Per block of [`ROWS`] samples: `val` is the samples' greatest common divisor, the stored indices are the samples
 //! divided by it, the filler is the cheapest that can code them (by exact bit count), and `pwr` is the smallest that
