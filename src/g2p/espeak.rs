@@ -302,7 +302,7 @@ impl Espeak {
                             out.push(Token::Break);
                         }
                         for w in clause.split_whitespace() {
-                            let phones = ipa::word(w)?;
+                            let phones = word(self.language, w)?;
                             if !phones.is_empty() {
                                 out.push(Token::Word(phones));
                             }
@@ -323,8 +323,19 @@ impl Espeak {
     }
 }
 
+/// One word of `language`'s eSpeak IPA as phones. eSpeak's Russian writes ы, an unrounded vowel, as `y`, which in IPA
+/// and in its other languages is the rounded one of "über".
+fn word(language: Language, ipa: &str) -> Result<Vec<super::Phone>, ipa::UnknownSymbol> {
+    if language == Language::Russian {
+        ipa::word(&ipa.replace('y', "ɨ"))
+    } else {
+        ipa::word(ipa)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::Arpabet;
     use super::*;
 
     #[test]
@@ -345,6 +356,22 @@ mod tests {
             data(Language::English, Path::new("/nonexistent"), &mut |_| {}),
             Err(EspeakError::NotEspeak(Language::English))
         ));
+    }
+
+    #[test]
+    fn russian_y_is_unrounded_and_other_languages_keep_it_rounded() {
+        let vowel = |l, w| word(l, w).unwrap()[1].sound;
+        assert_eq!(vowel(Language::Russian, "tˈy"), Arpabet::Ih);
+        assert_eq!(vowel(Language::French, "tˈy"), Arpabet::Uw);
+    }
+
+    #[test]
+    #[ignore = "needs IPSDOC_ESPEAK_DATA"]
+    fn russian_writes_y_for_its_unrounded_vowel() {
+        let dir = std::env::var_os("IPSDOC_ESPEAK_DATA").expect("IPSDOC_ESPEAK_DATA names eSpeak's data directory");
+        let ru = Espeak::new(Language::Russian, Path::new(&dir)).unwrap();
+        assert_eq!(ru.translator.text_to_ipa("ты").unwrap().trim(), "tˈy");
+        assert_eq!(ru.tokens("ты").unwrap(), [Token::Word(ipa::word("tˈɨ").unwrap())]);
     }
 
     /// Reads the real data from `IPSDOC_ESPEAK_DATA` (a directory [`data`] filled); tests never download.
